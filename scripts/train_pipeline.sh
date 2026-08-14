@@ -11,7 +11,7 @@ shift
 
 case "$stage" in
   teacher)
-    exec uv run gr3mini-train Gr3Mini-Tracking-DiffCritic-Teacher "$@"
+    exec uv run gr3mini-train Gr3Mini-Tracking-Teacher "$@"
     ;;
   adapter)
     if [[ $# -lt 1 ]]; then
@@ -20,7 +20,7 @@ case "$stage" in
     fi
     teacher_checkpoint=$1
     shift
-    exec uv run gr3mini-train Gr3Mini-Tracking-DiffCritic-Adapter \
+    exec uv run gr3mini-train Gr3Mini-Tracking-Adapter \
       --agent.teacher-checkpoint "$teacher_checkpoint" "$@"
     ;;
   *)

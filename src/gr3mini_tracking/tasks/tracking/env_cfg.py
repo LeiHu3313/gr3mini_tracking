@@ -54,7 +54,11 @@ def _observation_cfg(adapter: bool, play: bool) -> dict[str, ObservationGroupCfg
         ),
         "critic": ObservationGroupCfg(
             terms={
-                "current_privileged_state": ObservationTermCfg(func=obs.critic_current_state),
+                "privileged_state_action_history": ObservationTermCfg(
+                    func=obs.critic_current_state,
+                    history_length=obs.CRITIC_HISTORY_LENGTH,
+                    flatten_history_dim=True,
+                ),
                 "future_relative_goal": ObservationTermCfg(func=obs.future_relative_goal),
             },
             concatenate_terms=True,

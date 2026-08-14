@@ -9,6 +9,9 @@ from gr3mini_tracking.robots.gr3mini211 import JOINT_NAMES, TRACKED_BODY_NAMES
 from gr3mini_tracking.tasks.tracking.observations import (
     ACTOR_OBS_DIM,
     ADAPTER_HISTORY_LENGTH,
+    CRITIC_CURRENT_DIM,
+    CRITIC_HISTORY_DIM,
+    CRITIC_HISTORY_LENGTH,
     CRITIC_OBS_DIM,
     FRAME_DIM,
     WORLD_STATE_DIM,
@@ -17,7 +20,9 @@ from gr3mini_tracking.tasks.tracking.observations import (
 
 def test_observation_contract_dimensions() -> None:
     assert ACTOR_OBS_DIM == 671
-    assert CRITIC_OBS_DIM == 662
+    assert CRITIC_HISTORY_LENGTH == 6
+    assert CRITIC_HISTORY_DIM == 6 * CRITIC_CURRENT_DIM
+    assert CRITIC_OBS_DIM == 3047
     assert ADAPTER_HISTORY_LENGTH * FRAME_DIM == 6399
     assert WORLD_STATE_DIM == 57
     assert len(JOINT_NAMES) == 25

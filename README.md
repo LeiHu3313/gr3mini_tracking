@@ -25,8 +25,8 @@ uv run gr3mini-list-envs --keyword Gr3Mini
 
 应看到且只新增两个项目任务：
 
-- `Gr3Mini-Tracking-DiffCritic-Teacher`
-- `Gr3Mini-Tracking-DiffCritic-Adapter`
+- `Gr3Mini-Tracking-Teacher`
+- `Gr3Mini-Tracking-Adapter`
 
 ## 运动数据
 
@@ -47,7 +47,7 @@ uv run gr3mini-convert-motion \
 先用较小规模验证完整训练链路：
 
 ```bash
-uv run gr3mini-train Gr3Mini-Tracking-DiffCritic-Teacher \
+uv run gr3mini-train Gr3Mini-Tracking-Teacher \
   --env.scene.num-envs 64 \
   --agent.max-iterations 2 \
   --agent.save-interval 1
@@ -64,6 +64,12 @@ clip `0.2`、entropy `0.01`、32 mini-batches、4 epochs，actor/critic MLP 都�
 `(512, 512, 256, 256, 128)`。动作分布使用项目内的 Brax-compatible
 tanh-normal：网络输出 `2 * 25` 个 location/scale 参数。
 
+critic 使用 `[t-5, ..., t]` 的六帧完整 privileged state，每帧 477 维且已包含上一动作
+target，再接五帧 DiffCritic relative future reference。因此当前项目的 critic 输入为
+`6 × 477 + 5 × 37 = 3047` 维；actor 仍是原来的 671 维。先前 662/1067 维版本的
+checkpoint 不能 resume teacher/adapter 训练，但其中 teacher actor 权重仍可用作新
+adapter 阶段的 `--agent.teacher-checkpoint`。
+
 checkpoint 默认位于：
 
 ```text
@@ -79,7 +85,7 @@ Smoke：
 
 ```bash
 TEACHER_CKPT=/absolute/path/to/model_1.pt
-uv run gr3mini-train Gr3Mini-Tracking-DiffCritic-Adapter \
+uv run gr3mini-train Gr3Mini-Tracking-Adapter \
   --agent.teacher-checkpoint "$TEACHER_CKPT" \
   --env.scene.num-envs 64 \
   --agent.max-iterations 2 \
@@ -103,7 +109,7 @@ world-model runner 是单 GPU 实现。
 Teacher resume：
 
 ```bash
-uv run gr3mini-train Gr3Mini-Tracking-DiffCritic-Teacher \
+uv run gr3mini-train Gr3Mini-Tracking-Teacher \
   --agent.resume True \
   --agent.load-run '2026-.*' \
   --agent.load-checkpoint 'model_.*.pt' \
@@ -114,7 +120,7 @@ Adapter resume 仍需给出原 teacher 路径用于构造阶段，随后 adapter
 完整模型状态：
 
 ```bash
-uv run gr3mini-train Gr3Mini-Tracking-DiffCritic-Adapter \
+uv run gr3mini-train Gr3Mini-Tracking-Adapter \
   --agent.teacher-checkpoint /absolute/path/to/teacher/model.pt \
   --agent.resume True \
   --agent.max-iterations 1000
@@ -123,7 +129,7 @@ uv run gr3mini-train Gr3Mini-Tracking-DiffCritic-Adapter \
 本地 teacher 播放：
 
 ```bash
-uv run gr3mini-play Gr3Mini-Tracking-DiffCritic-Teacher \
+uv run gr3mini-play Gr3Mini-Tracking-Teacher \
   --checkpoint-file /absolute/path/to/teacher/model.pt \
   --motion-file "$PWD/motions/Extended_3_stageii_new3_mjlab.npz"
 ```
@@ -136,9 +142,10 @@ teacher base、history encoder 和 world model，不需要额外传 teacher chec
 | 项目 | Teacher | Adapter |
 |---|---:|---:|
 | Actor observation | 671 | 671 + dynamics embedding |
-| Critic observation | 662 | 662 + dynamics embedding |
+| Critic observation | 3047 | 3047 + dynamics embedding |
 | Action | 25-D `reference q + residual` | 相同 |
 | Actor state history | 6 x 81 | 6 x 81 |
+| Critic privileged state/action history | 6 x 477 | 6 x 477 |
 | Future reference | 5 x 37 raw | 相同 |
 | Adapter history | - | 79 x 81 |
 | Dynamics embedding | - | 128 |

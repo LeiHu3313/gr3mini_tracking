@@ -35,7 +35,9 @@ CommandEncoding、DAgger、rough terrain、评估报表或旧 JAX/Brax 训练框
 | Actor 总维度 | `6 * 81 + 5 * 37 = 671` |
 | Critic 当前状态 | 477 维 privileged state |
 | Critic future | `future_raw - current_tracking_state`，`5 * 37` |
-| Critic 总维度 | `477 + 5 * 37 = 662` |
+| 源 Critic 总维度 | `477 + 5 * 37 = 662` |
+| 项目 Critic history 扩展 | `[t-5, ..., t]` 的 6 帧完整 privileged state/action，`6 * 477 = 2862` |
+| 项目 Critic 总维度 | `6 * 477 + 5 * 37 = 3047` |
 | Teacher MLP | actor/critic 均为 `(512, 512, 256, 256, 128)` |
 | PPO 关键参数 | lr `3e-4`、gamma `0.97`、lambda `0.95`、clip `0.2`、entropy `0.01` |
 | Adapter 历史 | 默认 79 帧，每帧 81 维 |
@@ -46,8 +48,9 @@ CommandEncoding、DAgger、rough terrain、评估报表或旧 JAX/Brax 训练框
 | Adapter 优化 | adapter + critic 用 PPO；history encoder + world model 用加权 world-model loss |
 
 DiffCritic 与 RawCritic 的 actor 完全相同；DiffCritic 只把 critic 的五帧 future goal
-改为相对当前 tracking state 的差值。本项目只注册 DiffCritic 名称，避免产生无意的
-实验变体。
+改为相对当前 tracking state 的差值。本项目保留该 DiffCritic goal，并按训练需求将
+critic 扩展为六帧完整 privileged state/action history；这与源任务 662 维 critic 的唯一
+观测差异。
 
 ## 3. 目标结构
 
@@ -100,9 +103,11 @@ gr3mini_tracking/
 ### 阶段 C：DiffCritic teacher
 
 - 实现 reference-relative residual joint-position action。
-- 实现 671 维 actor 与 662 维 critic observation，并以断言锁定维度和顺序。
+- 实现 671 维 actor 与 3047 维 critic observation；critic 是 `[t-5, ..., t]` 的
+  `6 x 477` 维完整 privileged state/action history，后接 5 帧 future relative goal，
+  并以断言锁定维度和顺序。
 - 移植 tracking rewards、termination、push、观测噪声和主要 dynamics DR。
-- 注册 `Gr3Mini-Tracking-DiffCritic-Teacher`，接入 mjlab/RSL-RL PPO。
+- 注册 `Gr3Mini-Tracking-Teacher`，接入 mjlab/RSL-RL PPO。
 
 ### 阶段 D：对应 adapter
 
@@ -112,7 +117,7 @@ gr3mini_tracking/
 - 实现 history encoder 与 autoregressive world model。
 - 在自定义 RSL-RL algorithm/runner 中分别更新 PPO 参数与 world-model 参数；保存
   teacher 来源、网络合同和完整 optimizer state。
-- 注册 `Gr3Mini-Tracking-DiffCritic-Adapter`；启动时必须显式给 teacher checkpoint，
+- 注册 `Gr3Mini-Tracking-Adapter`；启动时必须显式给 teacher checkpoint，
   并在加载前核对 actor 输入/隐藏层/输出维度。
 
 ### 阶段 E：验证与交付
@@ -136,7 +141,8 @@ gr3mini_tracking/
 - 项目不 import `track_mj`、JAX、Brax 或 mujoco_playground。
 - mjlab 源码仓库保持零修改。
 - 两个 task 可由项目自己的 CLI 列出并解析配置。
-- Actor/Critic observation 分别严格为 671/662；adapter history 为 `79 * 81`。
+- Actor/Critic observation 分别严格为 671/3047；critic history 为 `6 * 477`，adapter
+  history 为 `79 * 81`。
 - Teacher checkpoint 与 adapter 不匹配时 fail fast。
 - Adapter 初始化时 deterministic action 与 teacher 一致（容许浮点误差）。
 - 冻结 teacher base 后一次 adapter update 不改变其权重。
@@ -160,7 +166,8 @@ gr3mini_tracking/
 - 项目 CLI 只列出 Teacher/Adapter 两个新增任务。
 - Ruff、Pyright 和 5 个合同测试全部通过。
 - RTX 4080 上完成 teacher 与 adapter 环境 reset/step；观测实测为
-  `actor=671`、`critic=662`、`history=6399`、`world=57`、`reference_world=57`，
+  `actor=671`、`critic=3047`、`critic_history=2862`、`history=6399`、`world=57`、
+  `reference_world=57`，
   reward/observation 均为有限值。
 - Teacher 已完成 1 次最小 PPO update，并成功生成 RSL-RL checkpoint 与 ONNX。
 - Adapter 使用该 teacher checkpoint 完成 1 次 PPO + world-model update；checkpoint
