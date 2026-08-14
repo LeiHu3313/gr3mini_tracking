@@ -29,17 +29,17 @@ CommandEncoding、DAgger、rough terrain、评估报表或旧 JAX/Brax 训练框
 |---|---|
 | 控制/物理周期 | `0.02 s` / `0.002 s`，decimation `10` |
 | 动作 | 25 维，`reference_joint_pos + residual_action` |
-| Actor 当前帧 | gravity 3 + gyro 3 + joint pos 25 + joint vel 25 + previous motor target 25 = 81 |
-| Actor 历史 | 5 个过去帧 + 当前帧，共 `6 * 81` |
-| Actor future | `t+1..t+5`，每帧 37 维 raw reference |
-| Actor 总维度 | `6 * 81 + 5 * 37 = 671` |
-| Critic 当前状态 | 477 维 privileged state |
-| Critic future | `future_raw - current_tracking_state`，`5 * 37` |
-| 源 Critic 总维度 | `477 + 5 * 37 = 662` |
-| 项目 Critic history 扩展 | `[t-5, ..., t]` 的 6 帧完整 privileged state/action，`6 * 477 = 2862` |
-| 项目 Critic 总维度 | `6 * 477 + 5 * 37 = 3047` |
+| Actor 状态帧 | default-relative joint pos 25 + scaled joint vel 25 + scaled gyro 3 + projected gravity 3 = 56 |
+| Actor 动作帧 | default-relative previous joint target = 25 |
+| Actor 历史 | 状态 `6 * 56`，后接动作 `6 * 25` |
+| Actor future | `t+1..t+5`，每帧 `[q_ref-q, ref root linvel local, ref-current angvel, current-to-ref base rot6d, torso target, feet targets]` = 40 |
+| Actor 总维度 | `6 * 56 + 6 * 25 + 5 * 40 = 686` |
+| Critic 的 actor 部分 | 无噪声语义副本，686 维（状态历史、动作历史、未来参考） |
+| Critic 当前特权状态 | root linvel、torso/feet 高度、接触及 26 body 的 root-local pose/velocity = 398 |
+| Critic tracking error | 26 body 的 root-local pose/velocity error + root velocity/rotation + torso/feet height error = 405 |
+| Critic 总维度 | `686 + 398 + 405 = 1489` |
 | Teacher MLP | actor/critic 均为 `(512, 512, 256, 256, 128)` |
-| PPO 关键参数 | lr `3e-4`、gamma `0.97`、lambda `0.95`、clip `0.2`、entropy `0.01` |
+| PPO 关键参数 | lr `3e-4`、gamma `0.98`、lambda `0.95`、clip `0.2`、entropy `0.01` |
 | Adapter 历史 | 默认 79 帧，每帧 81 维 |
 | History encoder | Conv1d `64@k9/s5 -> 64@k6/s3`，输出 128 维 |
 | Residual adapter | teacher actor 每层均叠加零初始化 adapter 分支；teacher base 冻结 |
@@ -47,10 +47,12 @@ CommandEncoding、DAgger、rough terrain、评估报表或旧 JAX/Brax 训练框
 | World model | `(512, 512, 256, 256, 256, 128)`，预测 gyro/joint-velocity/root-height 增量 |
 | Adapter 优化 | adapter + critic 用 PPO；history encoder + world model 用加权 world-model loss |
 
-DiffCritic 与 RawCritic 的 actor 完全相同；DiffCritic 只把 critic 的五帧 future goal
-改为相对当前 tracking state 的差值。本项目保留该 DiffCritic goal，并按训练需求将
-critic 扩展为六帧完整 privileged state/action history；这与源任务 662 维 critic 的唯一
-观测差异。
+本项目 observation layout v3 以部署可观测性为边界：Actor 只能使用 encoder、IMU 和
+自己发出的 action；它不读取当前 root/world position 或 current root linear velocity。
+未来命令显式提供 canonicalized reference root linear velocity 与 current-to-reference
+base rotation 6D。Critic 以 Actor observation 为前缀，只追加单帧 current privileged
+state 与 reward-aligned tracking error，不再重复六帧特权状态。torso 高度固定为
+`torso_link`，不是 floating `base_link`。
 
 ## 3. 目标结构
 
@@ -103,9 +105,9 @@ gr3mini_tracking/
 ### 阶段 C：DiffCritic teacher
 
 - 实现 reference-relative residual joint-position action。
-- 实现 671 维 actor 与 3047 维 critic observation；critic 是 `[t-5, ..., t]` 的
-  `6 x 477` 维完整 privileged state/action history，后接 5 帧 future relative goal，
-  并以断言锁定维度和顺序。
+- 实现 686 维 actor 与 1489 维 asymmetric critic observation；Actor 按状态历史、动作
+  历史、未来参考依次拼接（`6x56 + 6x25 + 5x40`）。Critic 依次拼接 clean Actor
+  observation、398 维当前特权状态、405 维 reward-aligned error，并以断言锁定维度和顺序。
 - 移植 tracking rewards、termination、push、观测噪声和主要 dynamics DR。
 - 注册 `Gr3Mini-Tracking-Teacher`，接入 mjlab/RSL-RL PPO。
 
@@ -141,8 +143,9 @@ gr3mini_tracking/
 - 项目不 import `track_mj`、JAX、Brax 或 mujoco_playground。
 - mjlab 源码仓库保持零修改。
 - 两个 task 可由项目自己的 CLI 列出并解析配置。
-- Actor/Critic observation 分别严格为 671/3047；critic history 为 `6 * 477`，adapter
-  history 为 `79 * 81`。
+- Actor/Critic observation 分别严格为 686/1489；Critic 的布局严格为
+  `Actor 686 + current privileged 398 + tracking error 405`，adapter history 为
+  `79 * 81`。
 - Teacher checkpoint 与 adapter 不匹配时 fail fast。
 - Adapter 初始化时 deterministic action 与 teacher 一致（容许浮点误差）。
 - 冻结 teacher base 后一次 adapter update 不改变其权重。
@@ -160,13 +163,18 @@ gr3mini_tracking/
 
 ## 7. 实施结果（2026-08-14）
 
-上述阶段 A-E 已完成。最终项目固定为 Python 3.12、mjlab 1.6.0、PyTorch 2.9.0
-（CUDA 12.8），并生成了项目内默认 motion。验收记录如下：
+以下是 observation layout v1/v2 的历史实施记录。当前 v3 已将 Actor 改为 686 维、Critic
+改为 1489 维 asymmetric layout，因此 v1/v2 的 teacher / adapter 训练结果、reset/step 和
+PPO smoke 不能视为 v3 的运行时验收；v3 必须从新 teacher 重新开始。
+
+旧 layout 项目固定为 Python 3.12、mjlab 1.6.0、PyTorch 2.9.0（CUDA 12.8），并生成了
+项目内默认 motion。验收记录如下：
 
 - 项目 CLI 只列出 Teacher/Adapter 两个新增任务。
-- Ruff、Pyright 和 5 个合同测试全部通过。
-- RTX 4080 上完成 teacher 与 adapter 环境 reset/step；观测实测为
-  `actor=671`、`critic=3047`、`critic_history=2862`、`history=6399`、`world=57`、
+- Ruff、Pyright 和 5 个合同测试全部通过；v3 修改后需要重新执行 reset/step smoke。
+- RTX 4080 上完成 teacher 与 adapter 环境 reset/step；此记录对应旧 layout。v2 的目标
+  观测为 `actor=656`、`critic=3047`、`critic_state_history=2712`、
+  `critic_action_history=150`、`history=6399`、`world=57`、
   `reference_world=57`，
   reward/observation 均为有限值。
 - Teacher 已完成 1 次最小 PPO update，并成功生成 RSL-RL checkpoint 与 ONNX。
@@ -175,3 +183,12 @@ gr3mini_tracking/
   的 12 个参数张量完全未变、12 个 adapter 参数张量均已发生非零更新。
 - `mjlab` 与 `any2track` 源仓库均保持零修改；smoke 日志位于本地 `logs/smoke/`，已被
   `.gitignore` 排除。
+
+### v3 重新验收（2026-08-14）
+
+- Actor 合同已更新为 686 维，Critic 合同更新为 1489 维；ObservationManager 打印的各项
+  子块严格为 Actor `336 + 150 + 200`、Critic `336 + 150 + 200 + 398 + 405`。
+- Ruff、Pyright、6 个合同测试和 git diff whitespace 检查全部通过。
+- RTX 4080 上以 64 environments、4 rollout steps、2 PPO iterations 重新完成 teacher
+  smoke；使用产生的 686-D checkpoint 继续完成 adapter 的 2 PPO/world-model iterations。
+  两阶段均没有 NaN 或 observation-contract 错误。

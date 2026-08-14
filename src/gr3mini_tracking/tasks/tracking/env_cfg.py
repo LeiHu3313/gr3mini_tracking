@@ -33,20 +33,27 @@ from .commands import Gr3MotionCommandCfg
 from .events import push_planar_velocity
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
-DEFAULT_MOTION_FILE = PROJECT_ROOT / "motions" / "Extended_3_stageii_new3_mjlab.npz"
+DEFAULT_MOTION_FILE = (
+    PROJECT_ROOT / "motions" / "Extended_3_stageii_from_g1_gr3mini_v211_isaaclab_mjlab.npz"
+)
 
 
 def _observation_cfg(adapter: bool, play: bool) -> dict[str, ObservationGroupCfg]:
     groups = {
         "actor": ObservationGroupCfg(
             terms={
-                "past_present": ObservationTermCfg(
-                    func=obs.actor_frame,
+                "state_history": ObservationTermCfg(
+                    func=obs.actor_state_frame,
                     params={"noisy": not play},
                     history_length=obs.ACTOR_HISTORY_LENGTH,
                     flatten_history_dim=True,
                 ),
-                "future_raw_reference": ObservationTermCfg(func=obs.future_raw_reference),
+                "action_history": ObservationTermCfg(
+                    func=obs.actor_action_target,
+                    history_length=obs.ACTOR_HISTORY_LENGTH,
+                    flatten_history_dim=True,
+                ),
+                "future_reference": ObservationTermCfg(func=obs.actor_future_reference),
             },
             concatenate_terms=True,
             enable_corruption=not play,
@@ -54,12 +61,23 @@ def _observation_cfg(adapter: bool, play: bool) -> dict[str, ObservationGroupCfg
         ),
         "critic": ObservationGroupCfg(
             terms={
-                "privileged_state_action_history": ObservationTermCfg(
-                    func=obs.critic_current_state,
-                    history_length=obs.CRITIC_HISTORY_LENGTH,
+                # The first 686 dimensions mirror the deployable actor layout.
+                # Keep this copy uncorrupted so the critic can use it together
+                # with exact simulation-only state for value estimation.
+                "actor_state_history": ObservationTermCfg(
+                    func=obs.actor_state_frame,
+                    params={"noisy": False},
+                    history_length=obs.ACTOR_HISTORY_LENGTH,
                     flatten_history_dim=True,
                 ),
-                "future_relative_goal": ObservationTermCfg(func=obs.future_relative_goal),
+                "actor_action_history": ObservationTermCfg(
+                    func=obs.actor_action_target,
+                    history_length=obs.ACTOR_HISTORY_LENGTH,
+                    flatten_history_dim=True,
+                ),
+                "actor_future_reference": ObservationTermCfg(func=obs.actor_future_reference),
+                "privileged_state": ObservationTermCfg(func=obs.critic_privileged_state),
+                "tracking_error": ObservationTermCfg(func=obs.critic_tracking_error),
             },
             concatenate_terms=True,
             enable_corruption=False,
@@ -183,59 +201,45 @@ def _events_cfg(play: bool) -> dict[str, EventTermCfg]:
 
 def _rewards_cfg() -> dict[str, RewardTermCfg]:
     return {
-        "rigid_body_pos_tracking_upper": RewardTermCfg(
-            func=rew.body_position_tracking_exp,
+        "body_local_pos": RewardTermCfg(
+            func=rew.body_local_position_tracking_exp, weight=1.0, params={"sigma": 0.30}
+        ),
+        "body_local_rot": RewardTermCfg(
+            func=rew.body_local_orientation_tracking_exp, weight=1.0, params={"sigma": 0.40}
+        ),
+        "body_local_linvel": RewardTermCfg(
+            func=rew.body_local_linear_velocity_tracking_exp,
             weight=1.0,
-            params={"body_names": rew.UPPER_REWARD_BODIES, "sigma": 1.0},
+            params={"sigma": 1.00},
         ),
-        "rigid_body_pos_tracking_lower": RewardTermCfg(
-            func=rew.body_position_tracking_exp,
-            weight=0.5,
-            params={"body_names": rew.LOWER_REWARD_BODIES, "sigma": 1.0},
-        ),
-        "rigid_body_rot_tracking": RewardTermCfg(
-            func=rew.body_orientation_tracking_exp, weight=0.5, params={"sigma": 1.0}
-        ),
-        "rigid_body_linvel_tracking": RewardTermCfg(
-            func=rew.body_linear_velocity_tracking_exp,
-            weight=0.5,
-            params={"sigma": 5.0},
-        ),
-        "rigid_body_angvel_tracking": RewardTermCfg(
-            func=rew.body_angular_velocity_tracking_exp,
-            weight=0.5,
-            params={"sigma": 50.0},
+        "body_local_angvel": RewardTermCfg(
+            func=rew.body_local_angular_velocity_tracking_exp,
+            weight=1.0,
+            params={"sigma": 3.14},
         ),
         "joint_pos_tracking": RewardTermCfg(
-            func=rew.joint_position_tracking_exp, weight=0.75, params={"sigma": 10.0}
+            func=rew.joint_position_tracking_exp, weight=0.5, params={"sigma": 10.0}
         ),
         "joint_vel_tracking": RewardTermCfg(
-            func=rew.joint_velocity_tracking_exp, weight=0.5, params={"sigma": 1.0}
+            func=rew.joint_velocity_tracking_exp, weight=0.2, params={"sigma": 1.0}
         ),
-        "roll_pitch_tracking": RewardTermCfg(
-            func=rew.torso_roll_pitch_tracking_exp, weight=1.0, params={"sigma": 0.2}
+        "root_orientation": RewardTermCfg(
+            func=rew.root_orientation_tracking_exp, weight=0.5, params={"sigma": 0.40}
         ),
         "root_linvel_tracking": RewardTermCfg(
             func=rew.root_linear_velocity_tracking_exp, weight=1.0, params={"sigma": 1.0}
         ),
         "root_angvel_tracking": RewardTermCfg(
-            func=rew.root_angular_velocity_tracking_exp, weight=1.0, params={"sigma": 10.0}
+            func=rew.root_angular_velocity_tracking_exp, weight=1.0, params={"sigma": 3.14}
         ),
-        "root_height_tracking": RewardTermCfg(
-            func=rew.root_height_tracking_exp, weight=1.0, params={"sigma": 0.1}
-        ),
-        "shoulder_height_tracking": RewardTermCfg(
-            func=rew.shoulder_height_tracking_exp, weight=1.0, params={"sigma": 0.1}
+        "torso_height_tracking": RewardTermCfg(
+            func=rew.torso_height_tracking_exp, weight=0.5, params={"sigma": 0.15}
         ),
         "feet_height_tracking": RewardTermCfg(
-            func=rew.feet_height_tracking_exp, weight=1.0, params={"sigma": 0.1}
+            func=rew.feet_height_tracking_exp, weight=0.3, params={"sigma": 0.15}
         ),
-        "feet_pos_tracking": RewardTermCfg(
-            func=rew.feet_position_tracking_exp, weight=2.1, params={"sigma": 1.0}
-        ),
-        "penalty_action_rate": RewardTermCfg(func=rew.target_rate_l2, weight=-0.5),
-        "penalty_torque": RewardTermCfg(func=rew.joint_torque_l2, weight=-2.0e-5),
-        "smoothness_joint": RewardTermCfg(func=rew.joint_smoothness, weight=-1.0e-6),
+        "penalty_torque": RewardTermCfg(func=rew.joint_torque_l2, weight=-1.0e-5),
+        "smoothness_joint": RewardTermCfg(func=rew.joint_smoothness, weight=-2.0e-7),
         "dof_pos_limit": RewardTermCfg(func=rew.joint_position_soft_limit, weight=-10.0),
         "dof_vel_limit": RewardTermCfg(func=rew.joint_velocity_limit, weight=-5.0),
         "collision": RewardTermCfg(func=rew.self_collision_count, weight=-10.0),
@@ -256,7 +260,11 @@ def gr3mini_diff_critic_env_cfg(
         pose_range={} if play else {"x": (-0.1, 0.1), "y": (-0.1, 0.1), "yaw": (-0.27, 0.27)},
         velocity_range={},
         joint_position_range=(0.0, 0.0),
-        sampling_mode="start" if play else "uniform",
+        sampling_mode="start" if play else "adaptive",
+        adaptive_bin_duration_s=0.25,
+        adaptive_uniform_ratio=0.25,
+        adaptive_tracking_error_weight=0.25,
+        adaptive_alpha=0.01,
         debug_vis=play,
     )
     sensors = (

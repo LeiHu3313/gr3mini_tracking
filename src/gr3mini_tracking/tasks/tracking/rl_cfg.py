@@ -32,7 +32,7 @@ def _algorithm(learning_rate: float, class_name: str = "PPO") -> RslRlPpoAlgorit
         num_mini_batches=32,
         learning_rate=learning_rate,
         schedule="fixed",
-        gamma=0.97,
+        gamma=0.98,
         lam=0.95,
         desired_kl=0.01,
         max_grad_norm=1.0,
@@ -42,7 +42,7 @@ def _algorithm(learning_rate: float, class_name: str = "PPO") -> RslRlPpoAlgorit
 
 def teacher_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     return RslRlOnPolicyRunnerCfg(
-        seed=0,
+        seed=233,
         actor=RslRlModelCfg(
             hidden_dims=HIDDEN_DIMS,
             activation="swish",
@@ -56,14 +56,14 @@ def teacher_runner_cfg() -> RslRlOnPolicyRunnerCfg:
         ),
         algorithm=_algorithm(3.0e-4),
         obs_groups={"actor": ("actor",), "critic": ("critic",)},
-        experiment_name="gr3mini_diffcritic_teacher",
+        experiment_name="gr3mini_teacher_normal",
         run_name="teacher",
         logger="tensorboard",
         upload_model=False,
         clip_actions=None,
-        save_interval=500,
-        num_steps_per_env=20,
-        max_iterations=36_622,
+        save_interval=1000,
+        num_steps_per_env=24,
+        max_iterations=50000,
     )
 
 
@@ -91,7 +91,7 @@ def adapter_runner_cfg() -> AdapterRunnerCfg:
         logger="tensorboard",
         upload_model=False,
         clip_actions=None,
-        save_interval=500,
-        num_steps_per_env=20,
-        max_iterations=36_622,
+        save_interval=1000,
+        num_steps_per_env=24,
+        max_iterations=50000,
     )

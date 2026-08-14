@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, cast
 import torch
 from mjlab.sensor import ContactSensor
 from mjlab.utils.lab_api.math import (
-    euler_xyz_from_quat,
     quat_apply_inverse,
     quat_error_magnitude,
     quat_inv,
@@ -16,11 +15,8 @@ from mjlab.utils.lab_api.math import (
 
 from gr3mini_tracking.robots.gr3mini211 import (
     DOF_VEL_LIMITS,
-    FEET_BODY_NAMES,
     FOOT_SITE_NAMES,
-    LOWER_BODY_NAMES,
-    SHOULDER_BODY_NAMES,
-    UPPER_BODY_NAMES,
+    TORSO_BODY_NAME,
 )
 
 from .actions import ReferenceResidualJointPositionAction
@@ -66,20 +62,21 @@ def _local_body_position_error(env: ManagerBasedRlEnv) -> torch.Tensor:
     return reference - current
 
 
-def body_position_tracking_exp(
-    env: ManagerBasedRlEnv, body_names: tuple[str, ...], sigma: float
-) -> torch.Tensor:
-    command = _command(env)
-    indexes = _body_indexes(command, body_names)
-    error = _local_body_position_error(env)[:, indexes]
-    return torch.exp(-error.abs().sum(dim=(-2, -1)) / sigma)
+def _gaussian_from_squared_error(squared_error: torch.Tensor, sigma: float) -> torch.Tensor:
+    """Return ``exp(-squared_error / sigma**2)`` for a positive scale."""
+    if sigma <= 0.0:
+        raise ValueError(f"sigma must be positive, got {sigma}")
+    return torch.exp(-squared_error / (sigma * sigma))
 
 
-def feet_position_tracking_exp(env: ManagerBasedRlEnv, sigma: float = 1.0) -> torch.Tensor:
-    return body_position_tracking_exp(env, FEET_BODY_NAMES, sigma)
+def body_local_position_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+    """Track all bodies relative to their respective reference/current roots."""
+    error = _local_body_position_error(env)
+    squared_error = error.square().sum(dim=-1).mean(dim=-1)
+    return _gaussian_from_squared_error(squared_error, sigma)
 
 
-def body_orientation_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+def body_local_orientation_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
     command = _command(env)
     count = len(command.cfg.body_names)
     current_root_inv = quat_inv(_robot(env).data.root_link_quat_w)
@@ -93,10 +90,10 @@ def body_orientation_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch
         command.body_quat_w,
     )
     angle = quat_error_magnitude(reference_local, current_local)
-    return torch.exp(-angle.mean(dim=-1) / sigma)
+    return _gaussian_from_squared_error(angle.square().mean(dim=-1), sigma)
 
 
-def body_linear_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+def body_local_linear_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
     command = _command(env)
     count = len(command.cfg.body_names)
     current = quat_apply_inverse(
@@ -108,10 +105,10 @@ def body_linear_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> t
         command.body_lin_vel_w,
     )
     error = reference - current
-    return torch.exp(-error.square().mean(dim=(-2, -1)) / sigma)
+    return _gaussian_from_squared_error(error.square().mean(dim=(-2, -1)), sigma)
 
 
-def body_angular_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+def body_local_angular_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
     command = _command(env)
     count = len(command.cfg.body_names)
     current = quat_apply_inverse(
@@ -123,7 +120,7 @@ def body_angular_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> 
         command.body_ang_vel_w,
     )
     error = reference - current
-    return torch.exp(-error.square().mean(dim=(-2, -1)) / sigma)
+    return _gaussian_from_squared_error(error.square().mean(dim=(-2, -1)), sigma)
 
 
 def joint_position_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
@@ -138,39 +135,32 @@ def joint_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.T
     return torch.exp(-(error.abs().sum(dim=-1) * env.step_dt) / sigma)
 
 
+def root_orientation_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+    command = _command(env)
+    angle = quat_error_magnitude(command.body_quat_w[:, 0], _robot(env).data.root_link_quat_w)
+    return _gaussian_from_squared_error(angle.square(), sigma)
+
+
 def root_linear_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
     command = _command(env)
     robot = _robot(env)
     ref = quat_apply_inverse(command.body_quat_w[:, 0], command.root_lin_vel_w)
     error = ref - robot.data.root_link_lin_vel_b
-    return torch.exp(-error.abs().sum(dim=-1) / sigma)
+    return _gaussian_from_squared_error(error.square().sum(dim=-1), sigma)
 
 
 def root_angular_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
     command = _command(env)
     error = command.root_ang_vel_b - _robot(env).data.root_link_ang_vel_b
-    return torch.exp(-error.abs().sum(dim=-1) / sigma)
+    return _gaussian_from_squared_error(error.square().sum(dim=-1), sigma)
 
 
-def torso_roll_pitch_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+def torso_height_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+    """Track the explicitly named torso height rather than the floating base height."""
     command = _command(env)
-    current = euler_xyz_from_quat(_robot(env).data.root_link_quat_w)
-    reference = euler_xyz_from_quat(command.body_quat_w[:, 0])
-    error = torch.stack([reference[0] - current[0], reference[1] - current[1]], dim=-1)
-    return torch.exp(-error.abs().sum(dim=-1) / sigma)
-
-
-def root_height_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
-    command = _command(env)
-    error = command.body_pos_w[:, 0, 2] - _robot(env).data.root_link_pos_w[:, 2]
-    return torch.exp(-error.abs() / sigma)
-
-
-def shoulder_height_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
-    command = _command(env)
-    indexes = _body_indexes(command, SHOULDER_BODY_NAMES)
-    error = command.body_pos_w[:, indexes, 2] - command.robot_body_pos_w[:, indexes, 2]
-    return torch.exp(-error.abs().mean(dim=-1) / sigma)
+    torso_index = _body_indexes(command, (TORSO_BODY_NAME,))[0]
+    error = command.body_pos_w[:, torso_index, 2] - command.robot_body_pos_w[:, torso_index, 2]
+    return _gaussian_from_squared_error(error.square(), sigma)
 
 
 def feet_height_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
@@ -182,7 +172,7 @@ def feet_height_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tens
         device=env.device,
     )
     error = command.feet_height_w - robot.data.site_pose_w[:, site_ids, 2]
-    return torch.exp(-error.abs().sum(dim=-1) / sigma)
+    return _gaussian_from_squared_error(error.square().mean(dim=-1), sigma)
 
 
 def target_rate_l2(env: ManagerBasedRlEnv) -> torch.Tensor:
@@ -220,7 +210,3 @@ def self_collision_count(env: ManagerBasedRlEnv) -> torch.Tensor:
 
 def terminated(env: ManagerBasedRlEnv) -> torch.Tensor:
     return env.termination_manager.terminated.float()
-
-
-UPPER_REWARD_BODIES = UPPER_BODY_NAMES
-LOWER_REWARD_BODIES = LOWER_BODY_NAMES

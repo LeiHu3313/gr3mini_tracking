@@ -30,17 +30,31 @@ uv run gr3mini-list-envs --keyword Gr3Mini
 
 ## 运动数据
 
-仓库内已经转换了当前 smoke/default motion：
-`motions/Extended_3_stageii_new3_mjlab.npz`。若源数据更新，重新转换：
+当前默认 motion 是：
+`motions/Extended_3_stageii_from_g1_gr3mini_v211_isaaclab_mjlab.npz`。它来自
+Isaac Lab 处理过的 23-DoF 数据；转换器会固定缺少的 head yaw/pitch，并用当前 mjlab
+模型生成 25-DoF、28-body、足端与速度参考，保证与训练仿真坐标系一致。若源数据更新：
 
 ```bash
 uv run gr3mini-convert-motion \
-  /home/hul/workspace/hl/code/any2track/storage/data/mocap/lafan1/FourierGR3Mini211/Extended_3_stageii_new3.npz \
-  motions/Extended_3_stageii_new3_mjlab.npz
+  /home/hul/workspace/hl/my_projects/whole_body_tracking/data/gr3mini/custom/Extended_3_stageii_from_g1_gr3mini_v211.npz \
+  motions/Extended_3_stageii_from_g1_gr3mini_v211_isaaclab_mjlab.npz
 ```
 
-转换器会强校验 25 个 joint、28 个 body、site 名称、50 Hz 和 `wxyz` 四元数合同，
-不会静默接受 body order 不一致的数据。
+转换器也兼容原 Any2Track archive；两种输入都会强校验 joint/body/site、50 Hz 与
+`wxyz` 四元数合同，不会静默接受 body order 不一致的数据。
+
+直接查看参考运动（不跑 policy 或物理）：
+
+```bash
+uv run gr3mini-replay-motion
+```
+
+`Space` 暂停/继续，`R` 从起点重播。可先做无界面的检查：
+
+```bash
+uv run gr3mini-replay-motion --headless --max-frames 10
+```
 
 ## 第一阶段：DiffCritic teacher
 
@@ -53,33 +67,52 @@ uv run gr3mini-train Gr3Mini-Tracking-Teacher \
   --agent.save-interval 1
 ```
 
-正式启动（默认 4096 env、20 rollout steps、36622 iterations）：
+正式启动（默认每个训练进程 4096 env、24 rollout steps、50000 iterations）：
 
 ```bash
 ./scripts/train_pipeline.sh teacher
 ```
 
-默认 PPO 映射保留源任务的 lr `3e-4`、gamma `0.97`、lambda `0.95`、
+默认 PPO 映射为 lr `3e-4`、gamma `0.98`、lambda `0.95`、
 clip `0.2`、entropy `0.01`、32 mini-batches、4 epochs，actor/critic MLP 都是
 `(512, 512, 256, 256, 128)`。动作分布使用项目内的 Brax-compatible
 tanh-normal：网络输出 `2 * 25` 个 location/scale 参数。
 
-critic 使用 `[t-5, ..., t]` 的六帧完整 privileged state，每帧 477 维且已包含上一动作
-target，再接五帧 DiffCritic relative future reference。因此当前项目的 critic 输入为
-`6 × 477 + 5 × 37 = 3047` 维；actor 仍是原来的 671 维。先前 662/1067 维版本的
-checkpoint 不能 resume teacher/adapter 训练，但其中 teacher actor 权重仍可用作新
-adapter 阶段的 `--agent.teacher-checkpoint`。
+当前 tracking reward 使用 whole-body root-local pose/velocity（4 项）为主，root
+orientation/velocity 与 torso/feet height 为整体动态辅助；joint tracking 为低权重辅助。
+soft regularization 仅保留 torque（`-1e-5`）和 joint smoothness（`-2e-7`）；
+reference-residual target 的 action-rate 暂不启用，避免把参考轨迹本身的快速变化当作
+policy 抖动惩罚。关节/速度限位和 self-collision safety penalties 保持启用。
+
+观测按 **状态历史 → 动作历史 → 未来参考** 拼接。Actor 输入为
+`6 × 56 + 6 × 25 + 5 × 40 = 686` 维，严格只使用 encoder、IMU 与自己发出的 action：
+状态帧为 `[q-default, qd×0.05, gyro×0.05, projected_gravity]`，动作帧为
+`last_target-default`；未来命令帧为
+`[q_ref-q, ref_linvel_local×0.05, (ref_angvel-current_gyro)×0.05,
+current-to-ref_base_rot6d, torso_height_ref, feet_height_ref]`。Actor 不读取当前
+root/world position、current root linear velocity、torso height、feet height 或 contact。
+
+Critic 输入为 `686 + 398 + 405 = 1489` 维：先是无噪声语义副本的 Actor observation；
+再接当前特权状态 `[root_linvel, torso/feet height, contact, 26 body root-local
+pose/velocity]`；最后接 reward-aligned tracking error
+`[26 body local pose/velocity error, root linear/angular velocity error,
+current-to-ref root rot6d, torso/feet height error]`。这避免重复六帧特权状态。所有角速度、
+线速度和关节速度均乘 `0.05`；torso 明确为 `torso_link`，不是 floating `base_link`。
+
+这是 observation layout v3。所有旧 671-D/656-D teacher 的首层输入都与新 686-D Actor
+不匹配，不能 resume，也不能作为 adapter 的 `--agent.teacher-checkpoint`；必须先训练
+v3 teacher。
 
 checkpoint 默认位于：
 
 ```text
-logs/rsl_rl/gr3mini_diffcritic_teacher/<timestamp>_teacher/model_<iteration>.pt
+logs/rsl_rl/gr3mini_teacher_normal/<timestamp>_teacher/model_<iteration>.pt
 ```
 
 ## 第二阶段：对应 adapter
 
-adapter 训练必须显式传入本项目第一阶段产生的 teacher checkpoint。启动时会核对
-teacher actor 的 671 输入维度、隐藏层和 50 输出维度；不匹配直接报错。
+adapter 训练必须显式传入本项目第一阶段产生的 v3 teacher checkpoint。启动时会核对
+teacher actor 的 686 输入维度、隐藏层和 50 输出维度；不匹配直接报错。
 
 Smoke：
 
@@ -131,7 +164,7 @@ uv run gr3mini-train Gr3Mini-Tracking-Adapter \
 ```bash
 uv run gr3mini-play Gr3Mini-Tracking-Teacher \
   --checkpoint-file /absolute/path/to/teacher/model.pt \
-  --motion-file "$PWD/motions/Extended_3_stageii_new3_mjlab.npz"
+  --motion-file "$PWD/motions/Extended_3_stageii_from_g1_gr3mini_v211_isaaclab_mjlab.npz"
 ```
 
 本地 adapter 播放同理，将 task 和 checkpoint 换成 Adapter；adapter checkpoint 已含
@@ -141,12 +174,12 @@ teacher base、history encoder 和 world model，不需要额外传 teacher chec
 
 | 项目 | Teacher | Adapter |
 |---|---:|---:|
-| Actor observation | 671 | 671 + dynamics embedding |
-| Critic observation | 3047 | 3047 + dynamics embedding |
+| Actor observation | 686 | 686 + dynamics embedding |
+| Critic observation | 1489 | 1489 + dynamics embedding |
 | Action | 25-D `reference q + residual` | 相同 |
-| Actor state history | 6 x 81 | 6 x 81 |
-| Critic privileged state/action history | 6 x 477 | 6 x 477 |
-| Future reference | 5 x 37 raw | 相同 |
+| Actor state / action history | `6 x 56` / `6 x 25` | 相同 |
+| Critic privileged / error | `398` / `405`（均为当前单帧） | 相同 |
+| Future reference | Actor `5 x 40`，并作为 Critic 前缀的一部分 | 相同 |
 | Adapter history | - | 79 x 81 |
 | Dynamics embedding | - | 128 |
 | World state | - | 57 |

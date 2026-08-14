@@ -213,6 +213,7 @@ UPPER_BODY_NAMES = (
 )
 
 TRACKED_BODY_NAMES = LOWER_BODY_NAMES + UPPER_BODY_NAMES
+TORSO_BODY_NAME = "torso_link"
 FEET_BODY_NAMES = ("left_foot_roll_link", "right_foot_roll_link")
 SHOULDER_BODY_NAMES = (
     "left_upper_arm_pitch_link",
