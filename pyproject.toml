@@ -1,0 +1,45 @@
+[project]
+name = "gr3mini-tracking"
+version = "0.1.0"
+description = "Clean mjlab migration of the GR3Mini211 DiffCritic teacher and adapter pipeline"
+readme = "README.md"
+authors = [
+    { name = "hul", email = "hul@fftaicorp.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "mjlab",
+    "torch==2.9.0",
+]
+
+[project.scripts]
+gr3mini-train = "gr3mini_tracking.cli.train:main"
+gr3mini-play = "gr3mini_tracking.cli.play:main"
+gr3mini-list-envs = "gr3mini_tracking.cli.list_envs:main"
+gr3mini-convert-motion = "gr3mini_tracking.cli.convert_motion:main"
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+mjlab = { path = "../mjlab", editable = true }
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.411",
+    "pytest>=9.1.1",
+    "ruff>=0.16.3",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+include = ["src", "tests"]
