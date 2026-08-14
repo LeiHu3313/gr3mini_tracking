@@ -63,7 +63,7 @@ def teacher_runner_cfg() -> RslRlOnPolicyRunnerCfg:
         clip_actions=None,
         save_interval=1000,
         num_steps_per_env=24,
-        max_iterations=50000,
+        max_iterations=5000,
     )
 
 
@@ -93,5 +93,5 @@ def adapter_runner_cfg() -> AdapterRunnerCfg:
         clip_actions=None,
         save_interval=1000,
         num_steps_per_env=24,
-        max_iterations=50000,
+        max_iterations=5000,
     )
