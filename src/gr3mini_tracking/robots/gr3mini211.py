@@ -220,6 +220,39 @@ SHOULDER_BODY_NAMES = (
     "right_upper_arm_pitch_link",
 )
 FOOT_SITE_NAMES = ("left_foot", "right_foot")
+UNDESIRED_GROUND_CONTACT_GEOM_NAMES = ("pelvis_collision", "torso", "head_collision")
+UNDESIRED_SELF_COLLISION_PAIRS = (
+    ("left_hand_collision", "left_thigh"),
+    ("right_hand_collision", "right_thigh"),
+    ("left_foot", "right_foot"),
+    ("left_foot", "right_shin"),
+    ("left_foot", "right_thigh"),
+    ("right_foot", "left_shin"),
+    ("right_foot", "left_thigh"),
+    ("left_shin", "right_shin"),
+    ("left_shin", "right_thigh"),
+    ("right_shin", "left_thigh"),
+    ("left_thigh", "right_thigh"),
+    ("left_hand_collision", "right_hand_collision"),
+    ("right_hand_collision", "torso"),
+    ("left_hand_collision", "torso"),
+    ("right_upper_arm_collision", "torso"),
+    ("left_upper_arm_collision", "torso"),
+    ("right_lower_arm_collision", "torso"),
+    ("left_lower_arm_collision", "torso"),
+    ("right_hand_collision", "pelvis_collision"),
+    ("left_hand_collision", "pelvis_collision"),
+    ("right_upper_arm_collision", "pelvis_collision"),
+    ("left_upper_arm_collision", "pelvis_collision"),
+    ("right_lower_arm_collision", "pelvis_collision"),
+    ("left_lower_arm_collision", "pelvis_collision"),
+    ("right_hand_collision", "head_collision"),
+    ("left_hand_collision", "head_collision"),
+    ("right_upper_arm_collision", "head_collision"),
+    ("left_upper_arm_collision", "head_collision"),
+    ("right_lower_arm_collision", "head_collision"),
+    ("left_lower_arm_collision", "head_collision"),
+)
 
 COLLISION_GEOM_NAMES = (
     "head_collision",

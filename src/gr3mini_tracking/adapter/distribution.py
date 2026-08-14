@@ -26,6 +26,7 @@ class TanhGaussianDistribution(Distribution):
         self._normal: Normal | None = None
         self._location: torch.Tensor | None = None
         self._scale: torch.Tensor | None = None
+        self._raw_sample: torch.Tensor | None = None
         self._last_log_prob: torch.Tensor | None = None
         Normal.set_default_validate_args(False)
 
@@ -39,14 +40,23 @@ class TanhGaussianDistribution(Distribution):
         self._location = location
         self._scale = scale
         self._normal = Normal(location, scale)
+        self._raw_sample = None
         self._last_log_prob = None
 
     def sample(self) -> torch.Tensor:
         assert self._normal is not None
         raw = self._normal.sample()
         action = torch.tanh(raw)
+        self._raw_sample = raw
         self._last_log_prob = self._log_prob_raw(raw)
         return action
+
+    @property
+    def raw_sample(self) -> torch.Tensor:
+        """Return the pre-tanh sample from the most recent ``sample`` call."""
+        if self._raw_sample is None:
+            raise RuntimeError("raw_sample is available only immediately after sample()")
+        return self._raw_sample
 
     def deterministic_output(self, mlp_output: torch.Tensor) -> torch.Tensor:
         return torch.tanh(mlp_output[..., 0, :])
@@ -81,6 +91,10 @@ class TanhGaussianDistribution(Distribution):
         # Stable log(d tanh(x) / dx), identical to Brax's TanhBijector.
         log_det = 2.0 * (math.log(2.0) - raw - torch.nn.functional.softplus(-2.0 * raw))
         return (self._normal.log_prob(raw) - log_det).sum(dim=-1)
+
+    def log_prob_raw(self, raw: torch.Tensor) -> torch.Tensor:
+        """Compute the tanh-normal log-probability from a pre-tanh action."""
+        return self._log_prob_raw(raw)
 
     def log_prob(self, outputs: torch.Tensor) -> torch.Tensor:
         bounded = outputs.clamp(-1.0 + 1.0e-6, 1.0 - 1.0e-6)

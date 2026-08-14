@@ -121,13 +121,23 @@ class Gr3MotionCommand(MotionCommand):
             return
 
         metrics = self.metrics
+        body_linvel_error = torch.linalg.vector_norm(
+            self.body_lin_vel_w - self.robot_body_lin_vel_w, dim=-1
+        ).mean(dim=-1)
+        body_angvel_error = torch.linalg.vector_norm(
+            self.body_ang_vel_w - self.robot_body_ang_vel_w, dim=-1
+        ).mean(dim=-1)
+        root_pos_error = torch.linalg.vector_norm(
+            self.body_pos_w[:, 0] - self.robot.data.root_link_pos_w, dim=-1
+        )
         tracking_error = torch.stack(
             (
                 metrics["error_body_pos"] / 0.30,
                 metrics["error_body_rot"] / 0.40,
+                body_linvel_error / 1.00,
+                body_angvel_error / 3.14,
+                root_pos_error / 0.30,
                 metrics["error_anchor_rot"] / 0.40,
-                metrics["error_anchor_lin_vel"] / 1.00,
-                metrics["error_anchor_ang_vel"] / 3.14,
             ),
             dim=-1,
         ).mean(dim=-1)

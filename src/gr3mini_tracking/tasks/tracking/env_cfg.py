@@ -22,6 +22,8 @@ from mjlab.viewer import ViewerConfig
 from gr3mini_tracking.robots.gr3mini211 import (
     COLLISION_GEOM_NAMES,
     TRACKED_BODY_NAMES,
+    UNDESIRED_GROUND_CONTACT_GEOM_NAMES,
+    UNDESIRED_SELF_COLLISION_PAIRS,
     get_gr3mini211_robot_cfg,
 )
 
@@ -199,50 +201,65 @@ def _events_cfg(play: bool) -> dict[str, EventTermCfg]:
     }
 
 
+def _undesired_self_collision_sensor_cfgs() -> tuple[ContactSensorCfg, ...]:
+    return tuple(
+        ContactSensorCfg(
+            name=f"undesired_self_collision_{index}",
+            primary=ContactMatch(mode="geom", pattern=primary, entity="robot"),
+            secondary=ContactMatch(mode="geom", pattern=secondary, entity="robot"),
+            fields=("found",),
+            reduce="none",
+            num_slots=1,
+        )
+        for index, (primary, secondary) in enumerate(UNDESIRED_SELF_COLLISION_PAIRS)
+    )
+
+
 def _rewards_cfg() -> dict[str, RewardTermCfg]:
     return {
         "body_local_pos": RewardTermCfg(
-            func=rew.body_local_position_tracking_exp, weight=1.0, params={"sigma": 0.30}
+            func=rew.body_local_position_tracking_exp, weight=2.0, params={"sigma": 0.30}
         ),
         "body_local_rot": RewardTermCfg(
-            func=rew.body_local_orientation_tracking_exp, weight=1.0, params={"sigma": 0.40}
+            func=rew.body_local_orientation_tracking_exp, weight=1.5, params={"sigma": 0.40}
         ),
-        "body_local_linvel": RewardTermCfg(
-            func=rew.body_local_linear_velocity_tracking_exp,
+        "body_global_linvel": RewardTermCfg(
+            func=rew.body_global_linear_velocity_tracking_exp,
             weight=1.0,
             params={"sigma": 1.00},
         ),
-        "body_local_angvel": RewardTermCfg(
-            func=rew.body_local_angular_velocity_tracking_exp,
+        "body_global_angvel": RewardTermCfg(
+            func=rew.body_global_angular_velocity_tracking_exp,
             weight=1.0,
             params={"sigma": 3.14},
         ),
         "joint_pos_tracking": RewardTermCfg(
             func=rew.joint_position_tracking_exp, weight=0.5, params={"sigma": 10.0}
         ),
-        "joint_vel_tracking": RewardTermCfg(
-            func=rew.joint_velocity_tracking_exp, weight=0.2, params={"sigma": 1.0}
+        "root_pos": RewardTermCfg(
+            func=rew.root_position_tracking_exp, weight=0.5, params={"sigma": 0.30}
         ),
         "root_orientation": RewardTermCfg(
-            func=rew.root_orientation_tracking_exp, weight=0.5, params={"sigma": 0.40}
-        ),
-        "root_linvel_tracking": RewardTermCfg(
-            func=rew.root_linear_velocity_tracking_exp, weight=1.0, params={"sigma": 1.0}
-        ),
-        "root_angvel_tracking": RewardTermCfg(
-            func=rew.root_angular_velocity_tracking_exp, weight=1.0, params={"sigma": 3.14}
+            func=rew.root_orientation_tracking_exp, weight=1.0, params={"sigma": 0.40}
         ),
         "torso_height_tracking": RewardTermCfg(
-            func=rew.torso_height_tracking_exp, weight=0.5, params={"sigma": 0.15}
+            func=rew.torso_height_tracking_exp, weight=1.0, params={"sigma": 0.15}
         ),
         "feet_height_tracking": RewardTermCfg(
-            func=rew.feet_height_tracking_exp, weight=0.3, params={"sigma": 0.15}
+            func=rew.feet_height_tracking_exp, weight=0.5, params={"sigma": 0.15}
         ),
+        "residual_action_rate": RewardTermCfg(func=rew.residual_action_rate_l2, weight=-0.1),
         "penalty_torque": RewardTermCfg(func=rew.joint_torque_l2, weight=-1.0e-5),
-        "smoothness_joint": RewardTermCfg(func=rew.joint_smoothness, weight=-2.0e-7),
-        "dof_pos_limit": RewardTermCfg(func=rew.joint_position_soft_limit, weight=-10.0),
-        "dof_vel_limit": RewardTermCfg(func=rew.joint_velocity_limit, weight=-5.0),
-        "collision": RewardTermCfg(func=rew.self_collision_count, weight=-10.0),
+        "smoothness_joint": RewardTermCfg(func=rew.joint_smoothness, weight=-1.0e-6),
+        "feet_slip": RewardTermCfg(func=rew.feet_slip, weight=-2.0),
+        "dof_pos_limit": RewardTermCfg(func=rew.joint_position_soft_limit, weight=-5.0),
+        "dof_vel_limit": RewardTermCfg(func=rew.joint_velocity_limit, weight=-10.0),
+        "undesired_self_collision": RewardTermCfg(
+            func=rew.undesired_self_collision_count, weight=-10.0
+        ),
+        "undesired_ground_contact": RewardTermCfg(
+            func=rew.undesired_ground_contact_count, weight=-10.0
+        ),
         "termination": RewardTermCfg(func=rew.terminated, weight=-200.0),
     }
 
@@ -276,13 +293,18 @@ def gr3mini_diff_critic_env_cfg(
             reduce="none",
             num_slots=1,
         ),
+        *_undesired_self_collision_sensor_cfgs(),
         ContactSensorCfg(
-            name="self_collision",
-            primary=ContactMatch(mode="subtree", pattern="base_link", entity="robot"),
-            secondary=ContactMatch(mode="subtree", pattern="base_link", entity="robot"),
+            name="undesired_ground_contact",
+            primary=ContactMatch(
+                mode="geom",
+                pattern=UNDESIRED_GROUND_CONTACT_GEOM_NAMES,
+                entity="robot",
+            ),
+            secondary=ContactMatch(mode="body", pattern="terrain"),
             fields=("found",),
             reduce="none",
-            num_slots=35,
+            num_slots=1,
         ),
     )
     cfg = ManagerBasedRlEnvCfg(

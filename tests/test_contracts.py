@@ -6,10 +6,14 @@ from typing import cast
 import numpy as np
 import torch
 from mjlab.envs import ManagerBasedRlEnv
+from rsl_rl.models import MLPModel
+from rsl_rl.storage import RolloutStorage
+from tensordict import TensorDict
 from torch import nn
 
 from gr3mini_tracking.adapter.distribution import TanhGaussianDistribution
 from gr3mini_tracking.adapter.models import HistoryEncoder, WorldModel
+from gr3mini_tracking.algorithms.tanh_ppo import TanhMLPModel, TanhPPO
 from gr3mini_tracking.cli.convert_motion import EXPECTED_BODY_NAMES, convert_motion_file
 from gr3mini_tracking.robots.gr3mini211 import JOINT_NAMES, TRACKED_BODY_NAMES
 from gr3mini_tracking.tasks.tracking import rewards as rew
@@ -58,28 +62,34 @@ def test_general_tracking_reward_configuration() -> None:
     expected_weights = {
         "body_local_pos": 1.0,
         "body_local_rot": 1.0,
-        "body_local_linvel": 1.0,
-        "body_local_angvel": 1.0,
+        "body_global_linvel": 1.0,
+        "body_global_angvel": 1.0,
+        "root_pos": 0.5,
         "root_orientation": 0.5,
-        "root_linvel_tracking": 1.0,
-        "root_angvel_tracking": 1.0,
-        "torso_height_tracking": 0.5,
-        "joint_pos_tracking": 0.5,
-        "joint_vel_tracking": 0.2,
+        "torso_height_tracking": 1.0,
+        "joint_pos_tracking": 0.2,
         "feet_height_tracking": 0.3,
+        "residual_action_rate": -0.1,
         "penalty_torque": -1.0e-5,
         "smoothness_joint": -2.0e-7,
+        "feet_slip": -1.0,
         "dof_pos_limit": -10.0,
         "dof_vel_limit": -5.0,
-        "collision": -10.0,
+        "undesired_self_collision": -10.0,
+        "undesired_ground_contact": -10.0,
         "termination": -200.0,
     }
     assert {name: cfg.weight for name, cfg in rewards.items()} == expected_weights
-    assert "penalty_action_rate" not in rewards
+    assert "body_local_linvel" not in rewards
+    assert "body_local_angvel" not in rewards
+    assert "root_linvel_tracking" not in rewards
+    assert "root_angvel_tracking" not in rewards
+    assert "joint_vel_tracking" not in rewards
     assert rewards["body_local_pos"].params == {"sigma": 0.30}
     assert rewards["body_local_rot"].params == {"sigma": 0.40}
-    assert rewards["body_local_linvel"].params == {"sigma": 1.00}
-    assert rewards["body_local_angvel"].params == {"sigma": 3.14}
+    assert rewards["body_global_linvel"].params == {"sigma": 1.00}
+    assert rewards["body_global_angvel"].params == {"sigma": 3.14}
+    assert rewards["root_pos"].params == {"sigma": 0.30}
     assert rewards["root_orientation"].func is rew.root_orientation_tracking_exp
 
     motion_cfg = cast(Gr3MotionCommandCfg, gr3mini_diff_critic_env_cfg().commands["motion"])
@@ -130,7 +140,17 @@ def test_gaussian_tracking_rewards_are_normalized_at_zero_error() -> None:
         ManagerBasedRlEnv,
         SimpleNamespace(
             device="cpu",
-            scene={"robot": robot},
+            scene={
+                "robot": robot,
+                "feet_ground_contact": SimpleNamespace(
+                    data=SimpleNamespace(found=torch.zeros(1, 2))
+                ),
+                "self_collision_0": SimpleNamespace(data=SimpleNamespace(found=torch.zeros(1, 1))),
+                "self_collision_1": SimpleNamespace(data=SimpleNamespace(found=torch.zeros(1, 1))),
+                "undesired_ground_contact": SimpleNamespace(
+                    data=SimpleNamespace(found=torch.zeros(1, 3))
+                ),
+            },
             command_manager=SimpleNamespace(get_term=lambda name: command),
         ),
     )
@@ -138,11 +158,10 @@ def test_gaussian_tracking_rewards_are_normalized_at_zero_error() -> None:
     for func, sigma in (
         (rew.body_local_position_tracking_exp, 0.30),
         (rew.body_local_orientation_tracking_exp, 0.40),
-        (rew.body_local_linear_velocity_tracking_exp, 1.00),
-        (rew.body_local_angular_velocity_tracking_exp, 3.14),
+        (rew.body_global_linear_velocity_tracking_exp, 1.00),
+        (rew.body_global_angular_velocity_tracking_exp, 3.14),
+        (rew.root_position_tracking_exp, 0.30),
         (rew.root_orientation_tracking_exp, 0.40),
-        (rew.root_linear_velocity_tracking_exp, 1.00),
-        (rew.root_angular_velocity_tracking_exp, 3.14),
         (rew.torso_height_tracking_exp, 0.15),
         (rew.feet_height_tracking_exp, 0.15),
     ):
@@ -152,6 +171,32 @@ def test_gaussian_tracking_rewards_are_normalized_at_zero_error() -> None:
     torch.testing.assert_close(
         rew.body_local_position_tracking_exp(env, sigma=0.30), torch.exp(torch.tensor([-0.25]))
     )
+
+    command.robot_body_lin_vel_w[:, 2, 0] = 0.30
+    env.scene["feet_ground_contact"].data.found[:, 0] = 1.0
+    torch.testing.assert_close(rew.feet_slip(env), torch.tensor([0.04]))
+    env.scene["self_collision_0"].data.found[:] = 1.0
+    env.scene["self_collision_1"].data.found[:] = 1.0
+    env.scene["undesired_ground_contact"].data.found[:, [0, 2]] = 1.0
+    torch.testing.assert_close(
+        rew.undesired_self_collision_count(
+            env, sensor_names=("self_collision_0", "self_collision_1")
+        ),
+        torch.tensor([2.0]),
+    )
+    torch.testing.assert_close(rew.undesired_ground_contact_count(env), torch.tensor([2.0]))
+
+
+def test_residual_action_rate_excludes_reference_motion() -> None:
+    action = SimpleNamespace(
+        raw_action=torch.tensor([[0.25, -0.25]]),
+        previous_raw_actions=torch.tensor([[0.05, -0.05]]),
+    )
+    env = cast(
+        ManagerBasedRlEnv,
+        SimpleNamespace(action_manager=SimpleNamespace(get_term=lambda name: action)),
+    )
+    torch.testing.assert_close(rew.residual_action_rate_l2(env), torch.tensor([0.08]))
 
 
 def test_adaptive_sampling_contracts() -> None:
@@ -219,6 +264,63 @@ def test_tanh_gaussian_contract() -> None:
     assert torch.isfinite(distribution.log_prob(actions)).all()
     assert torch.isfinite(distribution.entropy).all()
     torch.testing.assert_close(distribution.deterministic_output(parameters), torch.zeros(4, 25))
+
+
+def test_tanh_gaussian_preserves_raw_samples_for_ppo() -> None:
+    distribution = TanhGaussianDistribution(1)
+    distribution.update(torch.tensor([[[20.0], [0.0]]]))
+    bounded = distribution.sample()
+    raw = distribution.raw_sample
+
+    torch.testing.assert_close(bounded, torch.tanh(raw))
+    torch.testing.assert_close(distribution.log_prob_raw(raw), -distribution.entropy)
+    # Reconstructing a saturated raw sample from tanh(raw) changes the likelihood.
+    assert not torch.allclose(distribution.log_prob(bounded), distribution.log_prob_raw(raw))
+
+
+def test_tanh_ppo_stores_raw_actions_and_executes_bounded_actions() -> None:
+    observations = TensorDict(
+        {"actor": torch.zeros(3, 2), "critic": torch.zeros(3, 2)}, batch_size=[3]
+    )
+    actor = TanhMLPModel(
+        observations,
+        {"actor": ["actor"], "critic": ["critic"]},
+        "actor",
+        1,
+        hidden_dims=(4,),
+        distribution_cfg={
+            "class_name": "gr3mini_tracking.adapter.distribution:TanhGaussianDistribution"
+        },
+    )
+    critic = MLPModel(
+        observations,
+        {"actor": ["actor"], "critic": ["critic"]},
+        "critic",
+        1,
+        hidden_dims=(4,),
+    )
+    storage = RolloutStorage("rl", 3, 1, observations, [1])
+    algorithm = TanhPPO(actor, critic, storage, num_learning_epochs=1, num_mini_batches=1)
+
+    applied_actions = algorithm.act(observations)
+    raw_actions = algorithm.transition.actions
+    assert raw_actions is not None
+    torch.testing.assert_close(applied_actions, torch.tanh(raw_actions))
+    torch.testing.assert_close(
+        algorithm.transition.actions_log_prob,
+        actor.get_output_log_prob(raw_actions),
+    )
+
+    algorithm.process_env_step(
+        observations,
+        torch.zeros(3),
+        torch.zeros(3, dtype=torch.bool),
+        {},
+    )
+    torch.testing.assert_close(storage.actions[0], raw_actions)
+    algorithm.compute_returns(observations)
+    losses = algorithm.update()
+    assert all(np.isfinite(value) for value in losses.values())
 
 
 def test_adapter_branches_start_at_zero() -> None:

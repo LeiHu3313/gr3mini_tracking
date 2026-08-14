@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import torch
-from rsl_rl.algorithms import PPO
 from rsl_rl.storage import RolloutStorage
 from rsl_rl.utils import resolve_obs_groups
 from tensordict import TensorDict
 from torch import nn
+
+from gr3mini_tracking.algorithms.tanh_ppo import TanhPPO
 
 from .models import (
     AdapterCritic,
@@ -18,7 +19,7 @@ from .models import (
 )
 
 
-class AdapterPPO(PPO):
+class AdapterPPO(TanhPPO):
     """PPO for adapter/critic plus autoregressive world-model training."""
 
     def __init__(
@@ -46,6 +47,7 @@ class AdapterPPO(PPO):
             57,
             device=self.device,
         )
+        self._applied_actions = torch.zeros_like(storage.actions)
 
     def process_env_step(
         self,
@@ -55,13 +57,16 @@ class AdapterPPO(PPO):
         extras: dict[str, torch.Tensor],
     ) -> None:
         self._next_world[self.storage.step].copy_(obs["world"])
+        if self.applied_actions is None:
+            raise RuntimeError("AdapterPPO.process_env_step called before act")
+        self._applied_actions[self.storage.step].copy_(self.applied_actions)
         super().process_env_step(obs, rewards, dones, extras)
 
     def _update_world_model(self) -> float:
         observations = self.storage.observations
         history = observations["history"]
         world = observations["world"]
-        actions = self.storage.actions
+        actions = self._applied_actions
         dones = self.storage.dones.bool()
         env_order = torch.randperm(self.storage.num_envs, device=self.device)
         chunk_count = min(self.world_model_num_mini_batches, self.storage.num_envs)

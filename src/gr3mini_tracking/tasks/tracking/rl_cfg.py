@@ -21,7 +21,10 @@ class AdapterRunnerCfg(RslRlOnPolicyRunnerCfg):
     world_model_num_mini_batches: int = 32
 
 
-def _algorithm(learning_rate: float, class_name: str = "PPO") -> RslRlPpoAlgorithmCfg:
+def _algorithm(
+    learning_rate: float,
+    class_name: str = "gr3mini_tracking.algorithms.tanh_ppo:TanhPPO",
+) -> RslRlPpoAlgorithmCfg:
     return RslRlPpoAlgorithmCfg(
         class_name=class_name,
         value_loss_coef=1.0,
@@ -32,7 +35,7 @@ def _algorithm(learning_rate: float, class_name: str = "PPO") -> RslRlPpoAlgorit
         num_mini_batches=32,
         learning_rate=learning_rate,
         schedule="fixed",
-        gamma=0.98,
+        gamma=0.97,
         lam=0.95,
         desired_kl=0.01,
         max_grad_norm=1.0,
@@ -44,6 +47,7 @@ def teacher_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     return RslRlOnPolicyRunnerCfg(
         seed=233,
         actor=RslRlModelCfg(
+            class_name="gr3mini_tracking.algorithms.tanh_ppo:TanhMLPModel",
             hidden_dims=HIDDEN_DIMS,
             activation="swish",
             obs_normalization=False,
@@ -62,7 +66,7 @@ def teacher_runner_cfg() -> RslRlOnPolicyRunnerCfg:
         upload_model=False,
         clip_actions=None,
         save_interval=1000,
-        num_steps_per_env=24,
+        num_steps_per_env=20,
         max_iterations=5000,
     )
 
@@ -92,6 +96,6 @@ def adapter_runner_cfg() -> AdapterRunnerCfg:
         upload_model=False,
         clip_actions=None,
         save_interval=1000,
-        num_steps_per_env=24,
+        num_steps_per_env=20,
         max_iterations=5000,
     )

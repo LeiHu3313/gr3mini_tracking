@@ -12,6 +12,7 @@ from rsl_rl.utils import unpad_trajectories
 from tensordict import TensorDict
 from torch import nn
 
+from gr3mini_tracking.algorithms.tanh_ppo import TanhRawActionModelMixin
 from gr3mini_tracking.tasks.tracking.observations import (
     ADAPTER_HISTORY_LENGTH,
     FRAME_DIM,
@@ -50,7 +51,7 @@ class HistoryEncoder(nn.Module):
         return encoded.reshape(*leading, ADAPTER_EMBEDDING_DIM)
 
 
-class ResidualAdapterActor(MLPModel):
+class ResidualAdapterActor(TanhRawActionModelMixin, MLPModel):
     """Frozen teacher MLP with a zero-initialized adapter at every linear layer."""
 
     history_encoder: HistoryEncoder

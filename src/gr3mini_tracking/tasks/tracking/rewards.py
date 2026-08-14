@@ -15,8 +15,11 @@ from mjlab.utils.lab_api.math import (
 
 from gr3mini_tracking.robots.gr3mini211 import (
     DOF_VEL_LIMITS,
+    FEET_BODY_NAMES,
     FOOT_SITE_NAMES,
     TORSO_BODY_NAME,
+    UNDESIRED_GROUND_CONTACT_GEOM_NAMES,
+    UNDESIRED_SELF_COLLISION_PAIRS,
 )
 
 from .actions import ReferenceResidualJointPositionAction
@@ -93,33 +96,17 @@ def body_local_orientation_tracking_exp(env: ManagerBasedRlEnv, sigma: float) ->
     return _gaussian_from_squared_error(angle.square().mean(dim=-1), sigma)
 
 
-def body_local_linear_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+def body_global_linear_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+    """Track whole-body world-frame linear velocities, including the root."""
     command = _command(env)
-    count = len(command.cfg.body_names)
-    current = quat_apply_inverse(
-        _robot(env).data.root_link_quat_w[:, None, :].expand(-1, count, -1),
-        command.robot_body_lin_vel_w,
-    )
-    reference = quat_apply_inverse(
-        command.body_quat_w[:, 0, None, :].expand(-1, count, -1),
-        command.body_lin_vel_w,
-    )
-    error = reference - current
+    error = command.body_lin_vel_w - command.robot_body_lin_vel_w
     return _gaussian_from_squared_error(error.square().mean(dim=(-2, -1)), sigma)
 
 
-def body_local_angular_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+def body_global_angular_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+    """Track whole-body world-frame angular velocities, including the root."""
     command = _command(env)
-    count = len(command.cfg.body_names)
-    current = quat_apply_inverse(
-        _robot(env).data.root_link_quat_w[:, None, :].expand(-1, count, -1),
-        command.robot_body_ang_vel_w,
-    )
-    reference = quat_apply_inverse(
-        command.body_quat_w[:, 0, None, :].expand(-1, count, -1),
-        command.body_ang_vel_w,
-    )
-    error = reference - current
+    error = command.body_ang_vel_w - command.robot_body_ang_vel_w
     return _gaussian_from_squared_error(error.square().mean(dim=(-2, -1)), sigma)
 
 
@@ -129,29 +116,16 @@ def joint_position_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.T
     return torch.exp(-error.abs().sum(dim=-1) / sigma)
 
 
-def joint_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
-    command = _command(env)
-    error = command.joint_vel - command.robot_joint_vel
-    return torch.exp(-(error.abs().sum(dim=-1) * env.step_dt) / sigma)
-
-
 def root_orientation_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
     command = _command(env)
     angle = quat_error_magnitude(command.body_quat_w[:, 0], _robot(env).data.root_link_quat_w)
     return _gaussian_from_squared_error(angle.square(), sigma)
 
 
-def root_linear_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+def root_position_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+    """Anchor the floating-base position in the world frame."""
     command = _command(env)
-    robot = _robot(env)
-    ref = quat_apply_inverse(command.body_quat_w[:, 0], command.root_lin_vel_w)
-    error = ref - robot.data.root_link_lin_vel_b
-    return _gaussian_from_squared_error(error.square().sum(dim=-1), sigma)
-
-
-def root_angular_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
-    command = _command(env)
-    error = command.root_ang_vel_b - _robot(env).data.root_link_ang_vel_b
+    error = command.body_pos_w[:, 0] - _robot(env).data.root_link_pos_w
     return _gaussian_from_squared_error(error.square().sum(dim=-1), sigma)
 
 
@@ -175,9 +149,10 @@ def feet_height_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tens
     return _gaussian_from_squared_error(error.square().mean(dim=-1), sigma)
 
 
-def target_rate_l2(env: ManagerBasedRlEnv) -> torch.Tensor:
+def residual_action_rate_l2(env: ManagerBasedRlEnv) -> torch.Tensor:
+    """Smooth only policy residuals, never the moving reference joint target."""
     action = _action(env)
-    return (action.last_target - action.previous_target).square().sum(dim=-1)
+    return (action.raw_action - action.previous_raw_actions).square().sum(dim=-1)
 
 
 def joint_torque_l2(env: ManagerBasedRlEnv) -> torch.Tensor:
@@ -202,10 +177,42 @@ def joint_velocity_limit(env: ManagerBasedRlEnv) -> torch.Tensor:
     return torch.clamp(_robot(env).data.joint_vel.abs() - limits, min=0.0, max=1.0).sum(dim=-1)
 
 
-def self_collision_count(env: ManagerBasedRlEnv) -> torch.Tensor:
-    sensor = cast(ContactSensor, env.scene["self_collision"])
+def _contact_per_primary(sensor: ContactSensor, primary_count: int) -> torch.Tensor:
+    """Reduce a contact sensor's slots to one boolean per configured primary."""
     assert sensor.data.found is not None
-    return (sensor.data.found > 0).float().sum(dim=-1)
+    found = sensor.data.found
+    return (found.reshape(found.shape[0], primary_count, -1) > 0).any(dim=-1)
+
+
+def feet_slip(env: ManagerBasedRlEnv, speed_threshold: float = 0.05) -> torch.Tensor:
+    """Penalize horizontal motion only for feet that are in terrain contact."""
+    command = _command(env)
+    foot_indexes = _body_indexes(command, FEET_BODY_NAMES)
+    speed = torch.linalg.vector_norm(command.robot_body_lin_vel_w[:, foot_indexes, :2], dim=-1)
+    contact = _contact_per_primary(cast(ContactSensor, env.scene["feet_ground_contact"]), 2)
+    return (torch.clamp(speed - speed_threshold, min=0.0).square() * contact).sum(dim=-1)
+
+
+def undesired_self_collision_count(
+    env: ManagerBasedRlEnv, sensor_names: tuple[str, ...] | None = None
+) -> torch.Tensor:
+    """Count configured collision pairs, excluding permitted self-contacts."""
+    if sensor_names is None:
+        sensor_names = tuple(
+            f"undesired_self_collision_{index}"
+            for index in range(len(UNDESIRED_SELF_COLLISION_PAIRS))
+        )
+    contacts = [
+        _contact_per_primary(cast(ContactSensor, env.scene[name]), 1).squeeze(-1)
+        for name in sensor_names
+    ]
+    return torch.stack(contacts, dim=-1).float().sum(dim=-1)
+
+
+def undesired_ground_contact_count(env: ManagerBasedRlEnv) -> torch.Tensor:
+    sensor = cast(ContactSensor, env.scene["undesired_ground_contact"])
+    contact = _contact_per_primary(sensor, len(UNDESIRED_GROUND_CONTACT_GEOM_NAMES))
+    return contact.float().sum(dim=-1)
 
 
 def terminated(env: ManagerBasedRlEnv) -> torch.Tensor:

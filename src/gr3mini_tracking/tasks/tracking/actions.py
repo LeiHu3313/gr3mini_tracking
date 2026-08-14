@@ -30,23 +30,24 @@ class ReferenceResidualJointPositionAction(JointPositionAction):
         super().__init__(cfg, env)
         current = self._entity.data.joint_pos[:, self._target_ids]
         self._last_target = current.clone()
-        self._previous_target = current.clone()
+        self._previous_raw_actions = torch.zeros_like(current)
 
     @property
     def last_target(self) -> torch.Tensor:
         return self._last_target
 
     @property
-    def previous_target(self) -> torch.Tensor:
-        return self._previous_target
+    def previous_raw_actions(self) -> torch.Tensor:
+        """Residual action from the previous control step."""
+        return self._previous_raw_actions
 
     def process_actions(self, actions: torch.Tensor) -> None:
+        self._previous_raw_actions.copy_(self._raw_actions)
         self._raw_actions[:] = actions
         command = cast(
             Gr3MotionCommand,
             self._env.command_manager.get_term(self.cfg.command_name),
         )
-        self._previous_target.copy_(self._last_target)
         self._processed_actions = command.joint_pos[:, self._target_ids] + actions * self._scale
         if self.cfg.clip is not None:
             self._processed_actions = torch.clamp(
@@ -62,4 +63,4 @@ class ReferenceResidualJointPositionAction(JointPositionAction):
         super().reset(env_ids)
         current = self._entity.data.joint_pos[:, self._target_ids]
         self._last_target[env_ids] = current[env_ids]
-        self._previous_target[env_ids] = current[env_ids]
+        self._previous_raw_actions[env_ids] = 0.0
