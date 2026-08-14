@@ -60,21 +60,21 @@ def test_observation_contract_dimensions() -> None:
 def test_general_tracking_reward_configuration() -> None:
     rewards = _rewards_cfg()
     expected_weights = {
-        "body_local_pos": 1.0,
-        "body_local_rot": 1.0,
+        "body_local_pos": 2.0,
+        "body_local_rot": 1.5,
         "body_global_linvel": 1.0,
         "body_global_angvel": 1.0,
         "root_pos": 0.5,
-        "root_orientation": 0.5,
+        "root_orientation": 1.0,
         "torso_height_tracking": 1.0,
-        "joint_pos_tracking": 0.2,
-        "feet_height_tracking": 0.3,
+        "joint_pos_tracking": 0.5,
+        "feet_height_tracking": 0.5,
         "residual_action_rate": -0.1,
         "penalty_torque": -1.0e-5,
-        "smoothness_joint": -2.0e-7,
-        "feet_slip": -1.0,
-        "dof_pos_limit": -10.0,
-        "dof_vel_limit": -5.0,
+        "smoothness_joint": -1.0e-6,
+        "feet_slip": -2.0,
+        "dof_pos_limit": -5.0,
+        "dof_vel_limit": -10.0,
         "undesired_self_collision": -10.0,
         "undesired_ground_contact": -10.0,
         "termination": -200.0,
@@ -97,6 +97,31 @@ def test_general_tracking_reward_configuration() -> None:
     assert motion_cfg.adaptive_bin_duration_s == 0.25
     assert motion_cfg.adaptive_uniform_ratio == 0.25
     assert motion_cfg.adaptive_tracking_error_weight == 0.25
+
+
+def test_console_episode_extras_are_grouped() -> None:
+    from gr3mini_tracking.console_logging import group_episode_extras
+
+    console = (
+        "header\n"
+        " Metrics/motion/error_body_pos: 0.3000\n"
+        "Episode_Reward/feet_slip: -0.0380\n"
+        "Episode_Termination/root_height: 16.4500\n"
+        "Episode_Reward/body_local_pos: 0.0672\n"
+        "footer\n"
+    )
+
+    assert group_episode_extras(console) == (
+        "header\n"
+        "\n[Episode_Reward]\n"
+        "Episode_Reward/body_local_pos: 0.0672\n"
+        "Episode_Reward/feet_slip: -0.0380\n"
+        "\n[Episode_Termination]\n"
+        "Episode_Termination/root_height: 16.4500\n"
+        "\n[Metrics]\n"
+        " Metrics/motion/error_body_pos: 0.3000\n"
+        "footer\n"
+    )
 
 
 def test_gaussian_tracking_rewards_are_normalized_at_zero_error() -> None:
@@ -174,7 +199,7 @@ def test_gaussian_tracking_rewards_are_normalized_at_zero_error() -> None:
 
     command.robot_body_lin_vel_w[:, 2, 0] = 0.30
     env.scene["feet_ground_contact"].data.found[:, 0] = 1.0
-    torch.testing.assert_close(rew.feet_slip(env), torch.tensor([0.04]))
+    torch.testing.assert_close(rew.feet_slip(env), torch.tensor([0.0625]))
     env.scene["self_collision_0"].data.found[:] = 1.0
     env.scene["self_collision_1"].data.found[:] = 1.0
     env.scene["undesired_ground_contact"].data.found[:, [0, 2]] = 1.0
