@@ -262,7 +262,7 @@ def _rewards_cfg() -> dict[str, RewardTermCfg]:
         "residual_action_rate": RewardTermCfg(func=rew.residual_action_rate_l2, weight=-0.1),
         "penalty_torque": RewardTermCfg(func=rew.joint_torque_l2, weight=-1.0e-5),
         "smoothness_joint": RewardTermCfg(func=rew.joint_smoothness, weight=-1.0e-6),
-        "feet_slip": RewardTermCfg(func=rew.feet_slip, weight=-2.0),
+        "feet_slip": RewardTermCfg(func=rew.feet_slip, weight=-0.5),
         "dof_pos_limit": RewardTermCfg(func=rew.joint_position_soft_limit, weight=-5.0),
         "dof_vel_limit": RewardTermCfg(func=rew.joint_velocity_limit, weight=-10.0),
         "undesired_self_collision": RewardTermCfg(
