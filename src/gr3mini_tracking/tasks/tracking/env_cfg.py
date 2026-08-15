@@ -235,7 +235,7 @@ def _rewards_cfg() -> dict[str, RewardTermCfg]:
         ),
         "torso_world_angvel": RewardTermCfg(
             func=rew.torso_world_angular_velocity_tracking_exp,
-            weight=1.0,
+            weight=3.0,
             params={"sigma": 6.0},
         ),
         "joint_pos_tracking": RewardTermCfg(
