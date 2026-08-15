@@ -19,6 +19,7 @@ docker_args=(
   --net=host
   --ipc=host
   --workdir /workspace/gr3mini_tracking
+  --env GR3MINI_USE_PREBUILT_ENV=1
   --env NVIDIA_DRIVER_CAPABILITIES=all
   --volume "${root_dir}:/workspace/gr3mini_tracking"
   --volume "${host_log_dir}:/workspace/gr3mini_tracking/logs"

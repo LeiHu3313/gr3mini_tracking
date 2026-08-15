@@ -14,6 +14,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/opt/gr3mini-tracking-venv \
+    GR3MINI_USE_PREBUILT_ENV=1 \
     GR3MINI_TRACKING_ROOT=/workspace/gr3mini_tracking \
     MUJOCO_GL=egl \
     MPLBACKEND=Agg \

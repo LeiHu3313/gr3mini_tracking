@@ -88,7 +88,7 @@ GPU_DEVICES='device=0' ./scripts/docker/run_gr3mini_tracking.sh \
 
 只有机器人侧工具需要 `HARDWARE_MODE=1`，训练不需要 `--privileged`、`/dev` 或 EtherCAT
 挂载。若项目的 Python 依赖或 `uv.lock` 改动，则重新构建镜像；一般的 Python/奖励/配置
-改动不需要重建。
+改动不需要重建。容器会使用镜像中预构建的环境并跳过 `uv` 同步。
 
 ## 运动数据
 
