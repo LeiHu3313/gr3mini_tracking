@@ -10,6 +10,7 @@ HIDDEN_DIMS = (512, 512, 256, 256, 128)
 TANH_NORMAL = {
     "class_name": "gr3mini_tracking.adapter.distribution:TanhGaussianDistribution",
     "min_std": 0.001,
+    "max_std": 1.0,
     "var_scale": 1.0,
 }
 
@@ -30,7 +31,7 @@ def _algorithm(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
-        entropy_coef=0.01,
+        entropy_coef=1.0e-4,
         num_learning_epochs=4,
         num_mini_batches=32,
         learning_rate=learning_rate,
@@ -58,7 +59,7 @@ def teacher_runner_cfg() -> RslRlOnPolicyRunnerCfg:
             activation="swish",
             obs_normalization=False,
         ),
-        algorithm=_algorithm(3.0e-4),
+        algorithm=_algorithm(1.0e-4),
         obs_groups={"actor": ("actor",), "critic": ("critic",)},
         experiment_name="gr3mini_teacher_normal",
         run_name="teacher",

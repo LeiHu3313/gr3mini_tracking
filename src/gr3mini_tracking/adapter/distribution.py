@@ -17,11 +17,24 @@ class _TanhLocation(nn.Module):
 
 
 class TanhGaussianDistribution(Distribution):
-    """Normal distribution followed by tanh, matching Brax's parameterization."""
+    """Normal distribution followed by tanh with a bounded raw-action standard deviation."""
 
-    def __init__(self, output_dim: int, min_std: float = 0.001, var_scale: float = 1.0):
+    def __init__(
+        self,
+        output_dim: int,
+        min_std: float = 0.001,
+        max_std: float = 1.0,
+        var_scale: float = 1.0,
+    ):
         super().__init__(output_dim)
+        if min_std <= 0.0:
+            raise ValueError(f"min_std must be positive, got {min_std}")
+        if max_std < min_std:
+            raise ValueError(f"max_std ({max_std}) must be at least min_std ({min_std})")
+        if var_scale <= 0.0:
+            raise ValueError(f"var_scale must be positive, got {var_scale}")
         self.min_std = min_std
+        self.max_std = max_std
         self.var_scale = var_scale
         self._normal: Normal | None = None
         self._location: torch.Tensor | None = None
@@ -37,6 +50,7 @@ class TanhGaussianDistribution(Distribution):
     def update(self, mlp_output: torch.Tensor) -> None:
         location, scale_parameter = torch.unbind(mlp_output, dim=-2)
         scale = (torch.nn.functional.softplus(scale_parameter) + self.min_std) * self.var_scale
+        scale = torch.clamp_max(scale, self.max_std)
         self._location = location
         self._scale = scale
         self._normal = Normal(location, scale)

@@ -334,10 +334,19 @@ def gr3mini_diff_critic_env_cfg(
         rewards=_rewards_cfg(),
         terminations={
             "time_out": TerminationTermCfg(func=time_out, time_out=True),
+            # A physical fall gate.  The 0.30 m reference-relative threshold
+            # matches the original tracker and is intentionally the only
+            # tracking-error termination.
             "root_height": TerminationTermCfg(func=term.bad_root_height),
-            "shoulder_height": TerminationTermCfg(func=term.bad_shoulder_height),
-            "body_position": TerminationTermCfg(func=term.bad_body_position),
+            # Always reset invalid MuJoCo states rather than letting them enter
+            # a rollout.  This is a numerical-safety check, not a tracking term.
             "invalid_state": TerminationTermCfg(func=term.invalid_state),
+            # These are useful tracking diagnostics, but not fall conditions:
+            # the target motion contains one-leg/hand-supported poses.  Making
+            # either a termination causes short episodes before PPO can learn
+            # the recovery.  Their corresponding rewards remain active.
+            # "shoulder_height": TerminationTermCfg(func=term.bad_shoulder_height),
+            # "body_position": TerminationTermCfg(func=term.bad_body_position),
         },
         viewer=ViewerConfig(
             origin_type=ViewerConfig.OriginType.ASSET_BODY,

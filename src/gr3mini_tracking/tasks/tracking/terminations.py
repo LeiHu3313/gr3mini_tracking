@@ -19,7 +19,7 @@ def _command(env: ManagerBasedRlEnv) -> Gr3MotionCommand:
     return cast(Gr3MotionCommand, env.command_manager.get_term("motion"))
 
 
-def bad_root_height(env: ManagerBasedRlEnv, threshold: float = 0.3) -> torch.Tensor:
+def bad_root_height(env: ManagerBasedRlEnv, threshold: float = 0.4) -> torch.Tensor:
     command = _command(env)
     current = command.robot.data.root_link_pos_w[:, 2]
     reference = command.body_pos_w[:, 0, 2]
@@ -53,4 +53,12 @@ def bad_body_position(env: ManagerBasedRlEnv, threshold: float = 0.5) -> torch.T
 
 def invalid_state(env: ManagerBasedRlEnv) -> torch.Tensor:
     data = _command(env).robot.data
-    return torch.isnan(data.joint_pos).any(dim=-1) | torch.isnan(data.joint_vel).any(dim=-1)
+    state_tensors = (
+        data.root_link_pos_w,
+        data.root_link_quat_w,
+        data.root_link_lin_vel_b,
+        data.root_link_ang_vel_b,
+        data.joint_pos,
+        data.joint_vel,
+    )
+    return torch.stack([~torch.isfinite(value).all(dim=-1) for value in state_tensors]).any(dim=0)

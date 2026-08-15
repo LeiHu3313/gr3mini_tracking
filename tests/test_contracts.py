@@ -17,6 +17,7 @@ from gr3mini_tracking.algorithms.tanh_ppo import TanhMLPModel, TanhPPO
 from gr3mini_tracking.cli.convert_motion import EXPECTED_BODY_NAMES, convert_motion_file
 from gr3mini_tracking.robots.gr3mini211 import JOINT_NAMES, TRACKED_BODY_NAMES
 from gr3mini_tracking.tasks.tracking import rewards as rew
+from gr3mini_tracking.tasks.tracking import terminations as term
 from gr3mini_tracking.tasks.tracking.commands import (
     Gr3MotionCommandCfg,
     adaptive_sampling_probabilities,
@@ -78,7 +79,7 @@ def test_general_tracking_reward_configuration() -> None:
         "dof_vel_limit": -10.0,
         "undesired_self_collision": -10.0,
         "undesired_ground_contact": -10.0,
-        "termination": -200.0,
+        "termination": -100.0,
     }
     assert {name: cfg.weight for name, cfg in rewards.items()} == expected_weights
     assert "body_local_linvel" not in rewards
@@ -99,6 +100,35 @@ def test_general_tracking_reward_configuration() -> None:
     assert motion_cfg.adaptive_bin_duration_s == 0.25
     assert motion_cfg.adaptive_uniform_ratio == 0.25
     assert motion_cfg.adaptive_tracking_error_weight == 0.25
+
+
+def test_tracking_terminations_only_reset_falls_or_invalid_states() -> None:
+    terminations = gr3mini_diff_critic_env_cfg().terminations
+
+    assert set(terminations) == {"time_out", "root_height", "invalid_state"}
+    assert terminations["root_height"].func is term.bad_root_height
+    assert terminations["invalid_state"].func is term.invalid_state
+
+
+def test_invalid_state_detects_nonfinite_root_and_joint_state() -> None:
+    data = SimpleNamespace(
+        root_link_pos_w=torch.zeros(2, 3),
+        root_link_quat_w=torch.tensor([[1.0, 0.0, 0.0, 0.0]] * 2),
+        root_link_lin_vel_b=torch.zeros(2, 3),
+        root_link_ang_vel_b=torch.zeros(2, 3),
+        joint_pos=torch.zeros(2, 2),
+        joint_vel=torch.zeros(2, 2),
+    )
+    command = SimpleNamespace(robot=SimpleNamespace(data=data))
+    env = cast(
+        ManagerBasedRlEnv,
+        SimpleNamespace(command_manager=SimpleNamespace(get_term=lambda name: command)),
+    )
+
+    torch.testing.assert_close(term.invalid_state(env), torch.tensor([False, False]))
+    data.root_link_pos_w[1, 0] = torch.inf
+    data.joint_vel[0, 0] = torch.nan
+    torch.testing.assert_close(term.invalid_state(env), torch.tensor([True, True]))
 
 
 def test_console_episode_extras_are_grouped() -> None:
@@ -300,6 +330,13 @@ def test_tanh_gaussian_contract() -> None:
     assert torch.isfinite(distribution.log_prob(actions)).all()
     assert torch.isfinite(distribution.entropy).all()
     torch.testing.assert_close(distribution.deterministic_output(parameters), torch.zeros(4, 25))
+
+
+def test_tanh_gaussian_caps_raw_standard_deviation() -> None:
+    distribution = TanhGaussianDistribution(2, min_std=0.001, max_std=1.0)
+    distribution.update(torch.tensor([[[0.0, 0.0], [100.0, 100.0]]]))
+
+    torch.testing.assert_close(distribution.std, torch.ones(1, 2))
 
 
 def test_tanh_gaussian_preserves_raw_samples_for_ppo() -> None:
