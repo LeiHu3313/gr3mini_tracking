@@ -98,7 +98,7 @@ def _rotate_world_to_body(quaternion_wxyz: np.ndarray, vector_w: np.ndarray) -> 
     )
 
 
-def _convert_opentrack(data: np.lib.npyio.NpzFile, source: Path) -> dict[str, np.ndarray]:
+def _convert_any2track(data: np.lib.npyio.NpzFile, source: Path) -> dict[str, np.ndarray]:
     joint_names = tuple(str(name) for name in data["joint_names"].tolist())
     if joint_names != ("base_free_joint", *JOINT_NAMES):
         raise ValueError("source joint order does not match GR3Mini211 v2.1.1")
@@ -131,7 +131,7 @@ def _convert_opentrack(data: np.lib.npyio.NpzFile, source: Path) -> dict[str, np
         "joint_names": np.asarray(JOINT_NAMES),
         "body_names": np.asarray(EXPECTED_BODY_NAMES),
         "frequency": np.asarray(frequency),
-        "metadata_json": _metadata(source, "opentrack_gr3mini_v211", frequency),
+        "metadata_json": _metadata(source, "any2track_gr3mini_v211", frequency),
     }
 
 
@@ -247,7 +247,7 @@ def _convert_isaaclab_gr3mini(data: np.lib.npyio.NpzFile, source: Path) -> dict[
 def convert_motion_file(source: Path, destination: Path) -> None:
     with np.load(source, allow_pickle=False) as data:
         converted = (
-            _convert_opentrack(data, source)
+            _convert_any2track(data, source)
             if "qpos" in data.files
             else _convert_isaaclab_gr3mini(data, source)
         )

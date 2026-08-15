@@ -116,6 +116,13 @@ def joint_position_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.T
     return torch.exp(-error.abs().sum(dim=-1) / sigma)
 
 
+def joint_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+    """Track joint velocities over one environment step."""
+    command = _command(env)
+    error = command.joint_vel - command.robot_joint_vel
+    return torch.exp(-error.abs().sum(dim=-1) * env.step_dt / sigma)
+
+
 def root_orientation_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
     command = _command(env)
     angle = quat_error_magnitude(command.body_quat_w[:, 0], _robot(env).data.root_link_quat_w)

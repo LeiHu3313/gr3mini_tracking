@@ -26,7 +26,7 @@ def bad_root_height(env: ManagerBasedRlEnv, threshold: float = 0.3) -> torch.Ten
     return (current - reference).abs() > threshold
 
 
-def bad_shoulder_height(env: ManagerBasedRlEnv, threshold: float = 0.3) -> torch.Tensor:
+def bad_shoulder_height(env: ManagerBasedRlEnv, threshold: float = 0.5) -> torch.Tensor:
     command = _command(env)
     idx = command.cfg.body_names.index(SHOULDER_BODY_NAMES[0])
     return (command.robot_body_pos_w[:, idx, 2] - command.body_pos_w[:, idx, 2]).abs() > threshold

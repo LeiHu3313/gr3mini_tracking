@@ -68,6 +68,7 @@ def test_general_tracking_reward_configuration() -> None:
         "root_orientation": 1.0,
         "torso_height_tracking": 1.0,
         "joint_pos_tracking": 0.5,
+        "joint_vel_tracking": 0.5,
         "feet_height_tracking": 0.5,
         "residual_action_rate": -0.1,
         "penalty_torque": -1.0e-5,
@@ -84,12 +85,13 @@ def test_general_tracking_reward_configuration() -> None:
     assert "body_local_angvel" not in rewards
     assert "root_linvel_tracking" not in rewards
     assert "root_angvel_tracking" not in rewards
-    assert "joint_vel_tracking" not in rewards
     assert rewards["body_local_pos"].params == {"sigma": 0.30}
     assert rewards["body_local_rot"].params == {"sigma": 0.40}
     assert rewards["body_global_linvel"].params == {"sigma": 1.00}
     assert rewards["body_global_angvel"].params == {"sigma": 3.14}
+    assert rewards["joint_vel_tracking"].params == {"sigma": 1.0}
     assert rewards["root_pos"].params == {"sigma": 0.30}
+    assert rewards["joint_vel_tracking"].func is rew.joint_velocity_tracking_exp
     assert rewards["root_orientation"].func is rew.root_orientation_tracking_exp
 
     motion_cfg = cast(Gr3MotionCommandCfg, gr3mini_diff_critic_env_cfg().commands["motion"])
@@ -142,6 +144,7 @@ def test_gaussian_tracking_rewards_are_normalized_at_zero_error() -> None:
         root_link_lin_vel_b=torch.zeros(1, 3),
         root_link_ang_vel_b=torch.zeros(1, 3),
         site_pose_w=torch.zeros(1, 2, 7),
+        joint_vel=torch.zeros(1, 2),
     )
     robot = SimpleNamespace(
         data=robot_data,
@@ -160,11 +163,14 @@ def test_gaussian_tracking_rewards_are_normalized_at_zero_error() -> None:
         root_lin_vel_w=torch.zeros(1, 3),
         root_ang_vel_b=torch.zeros(1, 3),
         feet_height_w=torch.zeros(1, 2),
+        joint_vel=torch.zeros(1, 2),
+        robot_joint_vel=torch.zeros(1, 2),
     )
     env = cast(
         ManagerBasedRlEnv,
         SimpleNamespace(
             device="cpu",
+            step_dt=0.02,
             scene={
                 "robot": robot,
                 "feet_ground_contact": SimpleNamespace(
@@ -189,6 +195,7 @@ def test_gaussian_tracking_rewards_are_normalized_at_zero_error() -> None:
         (rew.root_orientation_tracking_exp, 0.40),
         (rew.torso_height_tracking_exp, 0.15),
         (rew.feet_height_tracking_exp, 0.15),
+        (rew.joint_velocity_tracking_exp, 1.00),
     ):
         torch.testing.assert_close(func(env, sigma=sigma), torch.ones(1))
 
@@ -200,6 +207,10 @@ def test_gaussian_tracking_rewards_are_normalized_at_zero_error() -> None:
     command.robot_body_lin_vel_w[:, 2, 0] = 0.30
     env.scene["feet_ground_contact"].data.found[:, 0] = 1.0
     torch.testing.assert_close(rew.feet_slip(env), torch.tensor([0.0625]))
+    command.robot_joint_vel[:, 0] = 5.0
+    torch.testing.assert_close(
+        rew.joint_velocity_tracking_exp(env, sigma=1.0), torch.exp(torch.tensor([-0.10]))
+    )
     env.scene["self_collision_0"].data.found[:] = 1.0
     env.scene["self_collision_1"].data.found[:] = 1.0
     env.scene["undesired_ground_contact"].data.found[:, [0, 2]] = 1.0

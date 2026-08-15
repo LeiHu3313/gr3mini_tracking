@@ -1,0 +1,16 @@
+.git
+.venv
+.gitignore
+.pytest_cache
+.ruff_cache
+.pyright
+__pycache__
+**/__pycache__
+*.py[cod]
+*.egg-info
+build
+dist
+logs
+MUJOCO_LOG.TXT
+tests
+docs

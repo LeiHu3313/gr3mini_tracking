@@ -28,6 +28,68 @@ uv run gr3mini-list-envs --keyword Gr3Mini
 - `Gr3Mini-Tracking-Teacher`
 - `Gr3Mini-Tracking-Adapter`
 
+## Docker（服务器推荐）
+
+Docker 镜像会固定 CUDA 12.8、Python 3.12、PyTorch 2.9.0，以及
+`mjlab v1.6.0`（commit `0fb8a681136be94ffc636a3dd423cabb97d91f10`）。因此服务器不需要
+准备 `../mjlab` 或项目的 `.venv`。
+
+构建并推送镜像：
+
+```bash
+docker login docker.fftaicorp.com
+
+PROJECT=gr3mini_tracking \
+IMAGE_NAME=gr3mini-tracking \
+TAG=py312-cuda12.8-v2 \
+./scripts/docker/build_and_push_gr3mini_tracking.sh
+```
+
+服务器拉取并验证 GPU：
+
+```bash
+IMAGE=docker.fftaicorp.com/gr3mini_tracking/gr3mini-tracking:py312-cuda12.8-v2
+docker pull "$IMAGE"
+docker run --rm --gpus all --ipc=host "$IMAGE" Gr3Mini-Tracking-Teacher --help
+```
+
+单卡训练时只需挂载日志目录：
+
+```bash
+docker run --rm --gpus '"device=0"' --ipc=host \
+  -v "$PWD/logs:/workspace/gr3mini_tracking/logs" \
+  "$IMAGE" Gr3Mini-Tracking-Teacher \
+  --env.scene.num-envs 4096 \
+  --agent.max-iterations 5000 \
+  --agent.save-interval 500 \
+  --agent.run-name teacher_docker
+```
+
+多卡训练可将 `--gpus '"device=0,1,2,3"'` 与 `--gpu-ids all` 一起使用；
+`--env.scene.num-envs` 仍表示每张卡的环境数。
+
+交互使用已发布的 digest 镜像时，可用：
+
+```bash
+./scripts/docker/run_gr3mini_tracking.sh
+```
+
+该脚本会将当前宿主项目完整挂到镜像的项目路径，因而代码、奖励、motions 和脚本改动都会
+立即生效；镜像的 `.venv` 位于 `/opt/gr3mini-tracking-venv`，不会被挂载遮住。它还会在有
+`DISPLAY` 时自动启用 X11。例如运行单卡训练：
+
+```bash
+GPU_DEVICES='device=0' ./scripts/docker/run_gr3mini_tracking.sh \
+  Gr3Mini-Tracking-Teacher \
+  --env.scene.num-envs 4096 \
+  --agent.max-iterations 5000 \
+  --agent.run-name teacher_docker
+```
+
+只有机器人侧工具需要 `HARDWARE_MODE=1`，训练不需要 `--privileged`、`/dev` 或 EtherCAT
+挂载。若项目的 Python 依赖或 `uv.lock` 改动，则重新构建镜像；一般的 Python/奖励/配置
+改动不需要重建。
+
 ## 运动数据
 
 当前默认 motion 是：

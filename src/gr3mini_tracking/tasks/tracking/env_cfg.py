@@ -236,6 +236,9 @@ def _rewards_cfg() -> dict[str, RewardTermCfg]:
         "joint_pos_tracking": RewardTermCfg(
             func=rew.joint_position_tracking_exp, weight=0.5, params={"sigma": 10.0}
         ),
+        "joint_vel_tracking": RewardTermCfg(
+            func=rew.joint_velocity_tracking_exp, weight=0.5, params={"sigma": 1.0}
+        ),
         "root_pos": RewardTermCfg(
             func=rew.root_position_tracking_exp, weight=0.5, params={"sigma": 0.30}
         ),
@@ -260,7 +263,7 @@ def _rewards_cfg() -> dict[str, RewardTermCfg]:
         "undesired_ground_contact": RewardTermCfg(
             func=rew.undesired_ground_contact_count, weight=-10.0
         ),
-        "termination": RewardTermCfg(func=rew.terminated, weight=-200.0),
+        "termination": RewardTermCfg(func=rew.terminated, weight=-100.0),
     }
 
 
