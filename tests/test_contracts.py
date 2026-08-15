@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import numpy as np
+import pytest
 import torch
 from mjlab.envs import ManagerBasedRlEnv
 from rsl_rl.models import MLPModel
@@ -65,12 +66,14 @@ def test_general_tracking_reward_configuration() -> None:
         "body_local_rot": 1.5,
         "body_global_linvel": 1.0,
         "body_global_angvel": 1.0,
+        "torso_world_angvel": 1.0,
         "root_pos": 0.5,
         "root_orientation": 1.0,
+        "torso_world_orientation": 3.0,
         "torso_height_tracking": 1.0,
         "joint_pos_tracking": 0.5,
         "joint_vel_tracking": 0.5,
-        "feet_height_tracking": 0.5,
+        "feet_height_tracking": 1.0,
         "residual_action_rate": -0.1,
         "penalty_torque": -1.0e-5,
         "smoothness_joint": -1.0e-6,
@@ -92,8 +95,12 @@ def test_general_tracking_reward_configuration() -> None:
     assert rewards["body_global_angvel"].params == {"sigma": 3.14}
     assert rewards["joint_vel_tracking"].params == {"sigma": 1.0}
     assert rewards["root_pos"].params == {"sigma": 0.30}
+    assert rewards["root_orientation"].params == {"sigma": 0.40}
     assert rewards["joint_vel_tracking"].func is rew.joint_velocity_tracking_exp
     assert rewards["root_orientation"].func is rew.root_orientation_tracking_exp
+    assert rewards["torso_world_angvel"].params == {"sigma": 6.0}
+    assert rewards["torso_world_angvel"].func is rew.torso_world_angular_velocity_tracking_exp
+    assert rewards["torso_world_orientation"].func is rew.torso_world_orientation_tracking_exp
 
     motion_cfg = cast(Gr3MotionCommandCfg, gr3mini_diff_critic_env_cfg().commands["motion"])
     assert motion_cfg.sampling_mode == "adaptive"
@@ -105,8 +112,15 @@ def test_general_tracking_reward_configuration() -> None:
 def test_tracking_terminations_only_reset_falls_or_invalid_states() -> None:
     terminations = gr3mini_diff_critic_env_cfg().terminations
 
-    assert set(terminations) == {"time_out", "root_height", "invalid_state"}
+    assert set(terminations) == {
+        "time_out",
+        "root_height",
+        "torso_ground_contact_too_long",
+        "invalid_state",
+    }
     assert terminations["root_height"].func is term.bad_root_height
+    assert terminations["torso_ground_contact_too_long"].func is term.torso_ground_contact_too_long
+    assert terminations["torso_ground_contact_too_long"].params == {"duration_s": 1.0}
     assert terminations["invalid_state"].func is term.invalid_state
 
 
@@ -221,19 +235,26 @@ def test_gaussian_tracking_rewards_are_normalized_at_zero_error() -> None:
         (rew.body_local_orientation_tracking_exp, 0.40),
         (rew.body_global_linear_velocity_tracking_exp, 1.00),
         (rew.body_global_angular_velocity_tracking_exp, 3.14),
+        (rew.torso_world_angular_velocity_tracking_exp, 6.0),
         (rew.root_position_tracking_exp, 0.30),
         (rew.root_orientation_tracking_exp, 0.40),
+        (rew.torso_world_orientation_tracking_exp, 0.40),
         (rew.torso_height_tracking_exp, 0.15),
         (rew.feet_height_tracking_exp, 0.15),
         (rew.joint_velocity_tracking_exp, 1.00),
     ):
         torch.testing.assert_close(func(env, sigma=sigma), torch.ones(1))
 
+    command.robot_body_ang_vel_w[:, 1, 0] = 6.0
+    torch.testing.assert_close(
+        rew.torso_world_angular_velocity_tracking_exp(env, sigma=6.0),
+        torch.exp(torch.tensor([-1.0])),
+    )
+
     command.robot_body_pos_w[:, 1, 0] = 0.30
     torch.testing.assert_close(
         rew.body_local_position_tracking_exp(env, sigma=0.30), torch.exp(torch.tensor([-0.25]))
     )
-
     command.robot_body_lin_vel_w[:, 2, 0] = 0.30
     env.scene["feet_ground_contact"].data.found[:, 0] = 1.0
     torch.testing.assert_close(rew.feet_slip(env), torch.tensor([0.0625]))
@@ -251,6 +272,27 @@ def test_gaussian_tracking_rewards_are_normalized_at_zero_error() -> None:
         torch.tensor([2.0]),
     )
     torch.testing.assert_close(rew.undesired_ground_contact_count(env), torch.tensor([2.0]))
+
+
+def test_torso_ground_contact_termination_uses_continuous_contact_time() -> None:
+    contact_time = torch.tensor([[0.999], [1.0], [1.25]])
+    env = cast(
+        ManagerBasedRlEnv,
+        SimpleNamespace(
+            scene={
+                "torso_ground_contact": SimpleNamespace(
+                    data=SimpleNamespace(current_contact_time=contact_time)
+                )
+            }
+        ),
+    )
+
+    torch.testing.assert_close(
+        term.torso_ground_contact_too_long(env, duration_s=1.0),
+        torch.tensor([False, True, True]),
+    )
+    with pytest.raises(ValueError, match="duration_s must be positive"):
+        term.torso_ground_contact_too_long(env, duration_s=0.0)
 
 
 def test_residual_action_rate_excludes_reference_motion() -> None:

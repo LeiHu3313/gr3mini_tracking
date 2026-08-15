@@ -233,6 +233,11 @@ def _rewards_cfg() -> dict[str, RewardTermCfg]:
             weight=1.0,
             params={"sigma": 3.14},
         ),
+        "torso_world_angvel": RewardTermCfg(
+            func=rew.torso_world_angular_velocity_tracking_exp,
+            weight=1.0,
+            params={"sigma": 6.0},
+        ),
         "joint_pos_tracking": RewardTermCfg(
             func=rew.joint_position_tracking_exp, weight=0.5, params={"sigma": 10.0}
         ),
@@ -245,11 +250,14 @@ def _rewards_cfg() -> dict[str, RewardTermCfg]:
         "root_orientation": RewardTermCfg(
             func=rew.root_orientation_tracking_exp, weight=1.0, params={"sigma": 0.40}
         ),
+        "torso_world_orientation": RewardTermCfg(
+            func=rew.torso_world_orientation_tracking_exp, weight=3.0, params={"sigma": 0.40}
+        ),
         "torso_height_tracking": RewardTermCfg(
             func=rew.torso_height_tracking_exp, weight=1.0, params={"sigma": 0.15}
         ),
         "feet_height_tracking": RewardTermCfg(
-            func=rew.feet_height_tracking_exp, weight=0.5, params={"sigma": 0.15}
+            func=rew.feet_height_tracking_exp, weight=1.0, params={"sigma": 0.15}
         ),
         "residual_action_rate": RewardTermCfg(func=rew.residual_action_rate_l2, weight=-0.1),
         "penalty_torque": RewardTermCfg(func=rew.joint_torque_l2, weight=-1.0e-5),
@@ -309,6 +317,15 @@ def gr3mini_diff_critic_env_cfg(
             reduce="none",
             num_slots=1,
         ),
+        ContactSensorCfg(
+            name="torso_ground_contact",
+            primary=ContactMatch(mode="geom", pattern="torso", entity="robot"),
+            secondary=ContactMatch(mode="body", pattern="terrain"),
+            fields=("found",),
+            reduce="none",
+            num_slots=1,
+            track_air_time=True,
+        ),
     )
     cfg = ManagerBasedRlEnvCfg(
         scene=SceneCfg(
@@ -338,6 +355,10 @@ def gr3mini_diff_critic_env_cfg(
             # matches the original tracker and is intentionally the only
             # tracking-error termination.
             "root_height": TerminationTermCfg(func=term.bad_root_height),
+            "torso_ground_contact_too_long": TerminationTermCfg(
+                func=term.torso_ground_contact_too_long,
+                params={"duration_s": 1.0},
+            ),
             # Always reset invalid MuJoCo states rather than letting them enter
             # a rollout.  This is a numerical-safety check, not a tracking term.
             "invalid_state": TerminationTermCfg(func=term.invalid_state),

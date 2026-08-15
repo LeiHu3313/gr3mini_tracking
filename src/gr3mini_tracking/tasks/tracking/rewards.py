@@ -110,6 +110,14 @@ def body_global_angular_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: flo
     return _gaussian_from_squared_error(error.square().mean(dim=(-2, -1)), sigma)
 
 
+def torso_world_angular_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+    """Track the torso's world-frame angular velocity without body averaging."""
+    command = _command(env)
+    torso_index = _body_indexes(command, (TORSO_BODY_NAME,))[0]
+    error = command.body_ang_vel_w[:, torso_index] - command.robot_body_ang_vel_w[:, torso_index]
+    return _gaussian_from_squared_error(error.square().sum(dim=-1), sigma)
+
+
 def joint_position_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
     command = _command(env)
     error = command.joint_pos - command.robot_joint_pos
@@ -126,6 +134,23 @@ def joint_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.T
 def root_orientation_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
     command = _command(env)
     angle = quat_error_magnitude(command.body_quat_w[:, 0], _robot(env).data.root_link_quat_w)
+    return _gaussian_from_squared_error(angle.square(), sigma)
+
+
+def torso_world_orientation_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+    """Track the torso's world orientation independently of the floating base.
+
+    The whole-body local-orientation reward is root-relative and averages over all
+    tracked bodies.  Consequently, it does not directly penalize a root/torso
+    world-frame attitude drift, and the torso contributes only one body to that
+    average.  Keep this term separate so its strength is explicit in the task
+    configuration.
+    """
+    command = _command(env)
+    torso_index = _body_indexes(command, (TORSO_BODY_NAME,))[0]
+    angle = quat_error_magnitude(
+        command.body_quat_w[:, torso_index], command.robot_body_quat_w[:, torso_index]
+    )
     return _gaussian_from_squared_error(angle.square(), sigma)
 
 
