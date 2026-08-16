@@ -63,21 +63,21 @@ def test_general_tracking_reward_configuration() -> None:
     rewards = _rewards_cfg()
     expected_weights = {
         "body_local_pos": 2.0,
-        "body_local_rot": 1.5,
+        "feet_pos_tracking": 2.1,
+        "body_local_rot": 0.5,
         "body_global_linvel": 1.0,
         "body_global_angvel": 1.0,
-        "torso_world_angvel": 1.0,
-        "root_pos": 0.5,
+        "torso_world_angvel": 3.0,
         "root_orientation": 1.0,
         "torso_world_orientation": 3.0,
-        "torso_height_tracking": 1.0,
-        "joint_pos_tracking": 0.5,
-        "joint_vel_tracking": 0.5,
-        "feet_height_tracking": 1.0,
+        "torso_height_tracking": 2.0,
+        "joint_pos_tracking": 0.75,
+        "joint_vel_tracking": 0.75,
+        "feet_height_tracking": 2.0,
         "residual_action_rate": -0.1,
         "penalty_torque": -1.0e-5,
         "smoothness_joint": -1.0e-6,
-        "feet_slip": -2.0,
+        "feet_slip": -0.5,
         "dof_pos_limit": -5.0,
         "dof_vel_limit": -10.0,
         "undesired_self_collision": -10.0,
@@ -90,16 +90,18 @@ def test_general_tracking_reward_configuration() -> None:
     assert "root_linvel_tracking" not in rewards
     assert "root_angvel_tracking" not in rewards
     assert rewards["body_local_pos"].params == {"sigma": 0.30}
-    assert rewards["body_local_rot"].params == {"sigma": 0.40}
+    assert rewards["feet_pos_tracking"].params == {"sigma": 1.0}
+    assert rewards["body_local_rot"].params == {"sigma": 1.0}
     assert rewards["body_global_linvel"].params == {"sigma": 1.00}
     assert rewards["body_global_angvel"].params == {"sigma": 3.14}
     assert rewards["joint_vel_tracking"].params == {"sigma": 1.0}
-    assert rewards["root_pos"].params == {"sigma": 0.30}
-    assert rewards["root_orientation"].params == {"sigma": 0.40}
+    assert rewards["root_orientation"].params == {"sigma": 0.50}
     assert rewards["joint_vel_tracking"].func is rew.joint_velocity_tracking_exp
     assert rewards["root_orientation"].func is rew.root_orientation_tracking_exp
+    assert rewards["feet_pos_tracking"].func is rew.feet_local_position_tracking_exp
     assert rewards["torso_world_angvel"].params == {"sigma": 6.0}
     assert rewards["torso_world_angvel"].func is rew.torso_world_angular_velocity_tracking_exp
+    assert rewards["torso_world_orientation"].params == {"sigma": 0.50}
     assert rewards["torso_world_orientation"].func is rew.torso_world_orientation_tracking_exp
 
     motion_cfg = cast(Gr3MotionCommandCfg, gr3mini_diff_critic_env_cfg().commands["motion"])
@@ -115,10 +117,16 @@ def test_tracking_terminations_only_reset_falls_or_invalid_states() -> None:
     assert set(terminations) == {
         "time_out",
         "root_height",
+        "shoulder_height",
+        "body_position",
         "torso_ground_contact_too_long",
         "invalid_state",
     }
     assert terminations["root_height"].func is term.bad_root_height
+    assert terminations["shoulder_height"].func is term.bad_shoulder_height
+    assert terminations["shoulder_height"].params == {"threshold": 0.30}
+    assert terminations["body_position"].func is term.bad_body_position
+    assert terminations["body_position"].params == {"threshold": 0.50}
     assert terminations["torso_ground_contact_too_long"].func is term.torso_ground_contact_too_long
     assert terminations["torso_ground_contact_too_long"].params == {"duration_s": 1.0}
     assert terminations["invalid_state"].func is term.invalid_state
@@ -170,7 +178,7 @@ def test_console_episode_extras_are_grouped() -> None:
     )
 
 
-def test_gaussian_tracking_rewards_are_normalized_at_zero_error() -> None:
+def test_tracking_rewards_are_normalized_at_zero_error() -> None:
     body_names = (
         "base_link",
         "torso_link",
@@ -232,13 +240,13 @@ def test_gaussian_tracking_rewards_are_normalized_at_zero_error() -> None:
 
     for func, sigma in (
         (rew.body_local_position_tracking_exp, 0.30),
-        (rew.body_local_orientation_tracking_exp, 0.40),
+        (rew.feet_local_position_tracking_exp, 1.0),
+        (rew.body_local_orientation_tracking_exp, 1.00),
         (rew.body_global_linear_velocity_tracking_exp, 1.00),
         (rew.body_global_angular_velocity_tracking_exp, 3.14),
         (rew.torso_world_angular_velocity_tracking_exp, 6.0),
-        (rew.root_position_tracking_exp, 0.30),
-        (rew.root_orientation_tracking_exp, 0.40),
-        (rew.torso_world_orientation_tracking_exp, 0.40),
+        (rew.root_orientation_tracking_exp, 0.50),
+        (rew.torso_world_orientation_tracking_exp, 0.50),
         (rew.torso_height_tracking_exp, 0.15),
         (rew.feet_height_tracking_exp, 0.15),
         (rew.joint_velocity_tracking_exp, 1.00),
@@ -250,6 +258,49 @@ def test_gaussian_tracking_rewards_are_normalized_at_zero_error() -> None:
         rew.torso_world_angular_velocity_tracking_exp(env, sigma=6.0),
         torch.exp(torch.tensor([-1.0])),
     )
+
+    command.robot_body_pos_w[:, 2, 0] = 0.5
+    torch.testing.assert_close(
+        rew.feet_local_position_tracking_exp(env, sigma=1.0),
+        torch.exp(torch.tensor([-0.5])),
+    )
+    command.robot_body_pos_w[:, 2, 0] = 0.0
+
+    command.robot_body_quat_w[:, 1] = torch.tensor(
+        [torch.cos(torch.tensor(0.5)), 0.0, 0.0, torch.sin(torch.tensor(0.5))]
+    )
+    torch.testing.assert_close(
+        rew.body_local_orientation_tracking_exp(env, sigma=1.0),
+        torch.exp(torch.tensor([-1.0 / body_count])),
+    )
+    torch.testing.assert_close(
+        rew.torso_world_orientation_tracking_exp(env, sigma=0.5),
+        torch.exp(torch.tensor([-2.0])),
+    )
+    command.robot_body_quat_w[:, 1] = body_quat[:, 1]
+
+    robot.data.root_link_quat_w = torch.tensor(
+        [[torch.cos(torch.tensor(0.5)), 0.0, 0.0, torch.sin(torch.tensor(0.5))]]
+    )
+    torch.testing.assert_close(
+        rew.root_orientation_tracking_exp(env, sigma=0.5),
+        torch.exp(torch.tensor([-2.0])),
+    )
+    robot.data.root_link_quat_w = body_quat[:, 0]
+
+    command.robot_body_pos_w[:, 1, 2] = 0.30
+    torch.testing.assert_close(
+        rew.torso_height_tracking_exp(env, sigma=0.15),
+        torch.exp(torch.tensor([-2.0])),
+    )
+    command.robot_body_pos_w[:, 1, 2] = 0.0
+
+    robot.data.site_pose_w[:, :, 2] = 0.30
+    torch.testing.assert_close(
+        rew.feet_height_tracking_exp(env, sigma=0.15),
+        torch.exp(torch.tensor([-2.0])),
+    )
+    robot.data.site_pose_w[:, :, 2] = 0.0
 
     command.robot_body_pos_w[:, 1, 0] = 0.30
     torch.testing.assert_close(

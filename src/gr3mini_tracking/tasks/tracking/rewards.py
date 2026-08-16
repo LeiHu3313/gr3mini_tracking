@@ -79,7 +79,30 @@ def body_local_position_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> to
     return _gaussian_from_squared_error(squared_error, sigma)
 
 
+def feet_local_position_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+    """Track both feet in their respective root frames without root-XY anchoring.
+
+    This is the direct counterpart of the source DiffCritic
+    ``feet_pos_tracking`` term.  Unlike the whole-body position reward, errors
+    from the two feet are not diluted by averaging over every tracked body.
+    """
+    if sigma <= 0.0:
+        raise ValueError(f"sigma must be positive, got {sigma}")
+    command = _command(env)
+    foot_indexes = _body_indexes(command, FEET_BODY_NAMES)
+    feet_l1_error = _local_body_position_error(env)[:, foot_indexes].abs().sum(dim=(-2, -1))
+    return torch.exp(-feet_l1_error / sigma)
+
+
 def body_local_orientation_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+    """Track root-relative body orientations using DiffCritic's L1 exponential.
+
+    DiffCritic aggregates each body's geodesic angular error before applying
+    ``exp(-error / sigma)``.  In contrast to a squared Gaussian, this preserves
+    a useful tracking signal once a dynamic motion has a noticeable error.
+    """
+    if sigma <= 0.0:
+        raise ValueError(f"sigma must be positive, got {sigma}")
     command = _command(env)
     count = len(command.cfg.body_names)
     current_root_inv = quat_inv(_robot(env).data.root_link_quat_w)
@@ -93,7 +116,7 @@ def body_local_orientation_tracking_exp(env: ManagerBasedRlEnv, sigma: float) ->
         command.body_quat_w,
     )
     angle = quat_error_magnitude(reference_local, current_local)
-    return _gaussian_from_squared_error(angle.square().mean(dim=-1), sigma)
+    return torch.exp(-angle.mean(dim=-1) / sigma)
 
 
 def body_global_linear_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
@@ -132,26 +155,31 @@ def joint_velocity_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.T
 
 
 def root_orientation_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+    """Track world-frame root attitude with a broad L1 exponential signal."""
+    if sigma <= 0.0:
+        raise ValueError(f"sigma must be positive, got {sigma}")
     command = _command(env)
     angle = quat_error_magnitude(command.body_quat_w[:, 0], _robot(env).data.root_link_quat_w)
-    return _gaussian_from_squared_error(angle.square(), sigma)
+    return torch.exp(-angle / sigma)
 
 
 def torso_world_orientation_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
-    """Track the torso's world orientation independently of the floating base.
+    """Track the torso's world orientation with a broad L1 exponential.
 
     The whole-body local-orientation reward is root-relative and averages over all
     tracked bodies.  Consequently, it does not directly penalize a root/torso
     world-frame attitude drift, and the torso contributes only one body to that
-    average.  Keep this term separate so its strength is explicit in the task
-    configuration.
+    average.  This keeps a direct torso term while using the same L1-exponential
+    shape as DiffCritic, which saturates more slowly than a sharp Gaussian.
     """
+    if sigma <= 0.0:
+        raise ValueError(f"sigma must be positive, got {sigma}")
     command = _command(env)
     torso_index = _body_indexes(command, (TORSO_BODY_NAME,))[0]
     angle = quat_error_magnitude(
         command.body_quat_w[:, torso_index], command.robot_body_quat_w[:, torso_index]
     )
-    return _gaussian_from_squared_error(angle.square(), sigma)
+    return torch.exp(-angle / sigma)
 
 
 def root_position_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
@@ -162,14 +190,19 @@ def root_position_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Te
 
 
 def torso_height_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
-    """Track the explicitly named torso height rather than the floating base height."""
+    """Track torso height with an L1 exponential signal for recovery from a crouch."""
+    if sigma <= 0.0:
+        raise ValueError(f"sigma must be positive, got {sigma}")
     command = _command(env)
     torso_index = _body_indexes(command, (TORSO_BODY_NAME,))[0]
     error = command.body_pos_w[:, torso_index, 2] - command.robot_body_pos_w[:, torso_index, 2]
-    return _gaussian_from_squared_error(error.square(), sigma)
+    return torch.exp(-error.abs() / sigma)
 
 
 def feet_height_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tensor:
+    """Track mean foot-height error with an L1 exponential for dynamic swing phases."""
+    if sigma <= 0.0:
+        raise ValueError(f"sigma must be positive, got {sigma}")
     command = _command(env)
     robot = _robot(env)
     site_ids = torch.tensor(
@@ -178,7 +211,7 @@ def feet_height_tracking_exp(env: ManagerBasedRlEnv, sigma: float) -> torch.Tens
         device=env.device,
     )
     error = command.feet_height_w - robot.data.site_pose_w[:, site_ids, 2]
-    return _gaussian_from_squared_error(error.square().mean(dim=-1), sigma)
+    return torch.exp(-error.abs().mean(dim=-1) / sigma)
 
 
 def residual_action_rate_l2(env: ManagerBasedRlEnv) -> torch.Tensor:

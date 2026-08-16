@@ -220,8 +220,11 @@ def _rewards_cfg() -> dict[str, RewardTermCfg]:
         "body_local_pos": RewardTermCfg(
             func=rew.body_local_position_tracking_exp, weight=2.0, params={"sigma": 0.30}
         ),
+        "feet_pos_tracking": RewardTermCfg(
+            func=rew.feet_local_position_tracking_exp, weight=2.1, params={"sigma": 1.0}
+        ),
         "body_local_rot": RewardTermCfg(
-            func=rew.body_local_orientation_tracking_exp, weight=1.5, params={"sigma": 0.40}
+            func=rew.body_local_orientation_tracking_exp, weight=0.5, params={"sigma": 1.0}
         ),
         "body_global_linvel": RewardTermCfg(
             func=rew.body_global_linear_velocity_tracking_exp,
@@ -239,25 +242,25 @@ def _rewards_cfg() -> dict[str, RewardTermCfg]:
             params={"sigma": 6.0},
         ),
         "joint_pos_tracking": RewardTermCfg(
-            func=rew.joint_position_tracking_exp, weight=0.5, params={"sigma": 10.0}
+            func=rew.joint_position_tracking_exp, weight=0.75, params={"sigma": 10.0}
         ),
         "joint_vel_tracking": RewardTermCfg(
-            func=rew.joint_velocity_tracking_exp, weight=0.5, params={"sigma": 1.0}
+            func=rew.joint_velocity_tracking_exp, weight=0.75, params={"sigma": 1.0}
         ),
-        "root_pos": RewardTermCfg(
-            func=rew.root_position_tracking_exp, weight=0.5, params={"sigma": 0.30}
-        ),
+        # "root_pos": RewardTermCfg(
+        #     func=rew.root_position_tracking_exp, weight=0.5, params={"sigma": 0.30}
+        # ),
         "root_orientation": RewardTermCfg(
-            func=rew.root_orientation_tracking_exp, weight=1.0, params={"sigma": 0.40}
+            func=rew.root_orientation_tracking_exp, weight=1.0, params={"sigma": 0.50}
         ),
         "torso_world_orientation": RewardTermCfg(
-            func=rew.torso_world_orientation_tracking_exp, weight=3.0, params={"sigma": 0.40}
+            func=rew.torso_world_orientation_tracking_exp, weight=3.0, params={"sigma": 0.50}
         ),
         "torso_height_tracking": RewardTermCfg(
-            func=rew.torso_height_tracking_exp, weight=1.0, params={"sigma": 0.15}
+            func=rew.torso_height_tracking_exp, weight=2.0, params={"sigma": 0.15}
         ),
         "feet_height_tracking": RewardTermCfg(
-            func=rew.feet_height_tracking_exp, weight=1.0, params={"sigma": 0.15}
+            func=rew.feet_height_tracking_exp, weight=2.0, params={"sigma": 0.15}
         ),
         "residual_action_rate": RewardTermCfg(func=rew.residual_action_rate_l2, weight=-0.1),
         "penalty_torque": RewardTermCfg(func=rew.joint_torque_l2, weight=-1.0e-5),
@@ -351,10 +354,16 @@ def gr3mini_diff_critic_env_cfg(
         rewards=_rewards_cfg(),
         terminations={
             "time_out": TerminationTermCfg(func=time_out, time_out=True),
-            # A physical fall gate.  The 0.30 m reference-relative threshold
-            # matches the original tracker and is intentionally the only
-            # tracking-error termination.
+            # Reference-relative fall gates matching the original tracker.
             "root_height": TerminationTermCfg(func=term.bad_root_height),
+            "shoulder_height": TerminationTermCfg(
+                func=term.bad_shoulder_height,
+                params={"threshold": 0.30},
+            ),
+            "body_position": TerminationTermCfg(
+                func=term.bad_body_position,
+                params={"threshold": 0.50},
+            ),
             "torso_ground_contact_too_long": TerminationTermCfg(
                 func=term.torso_ground_contact_too_long,
                 params={"duration_s": 1.0},
