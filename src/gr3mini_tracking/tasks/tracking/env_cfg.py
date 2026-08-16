@@ -238,7 +238,7 @@ def _rewards_cfg() -> dict[str, RewardTermCfg]:
         ),
         "torso_world_angvel": RewardTermCfg(
             func=rew.torso_world_angular_velocity_tracking_exp,
-            weight=3.0,
+            weight=5.0,
             params={"sigma": 6.0},
         ),
         "joint_pos_tracking": RewardTermCfg(
@@ -254,10 +254,10 @@ def _rewards_cfg() -> dict[str, RewardTermCfg]:
             func=rew.root_orientation_tracking_exp, weight=1.0, params={"sigma": 0.50}
         ),
         "torso_world_orientation": RewardTermCfg(
-            func=rew.torso_world_orientation_tracking_exp, weight=3.0, params={"sigma": 0.50}
+            func=rew.torso_world_orientation_tracking_exp, weight=5.0, params={"sigma": 0.50}
         ),
         "torso_height_tracking": RewardTermCfg(
-            func=rew.torso_height_tracking_exp, weight=2.0, params={"sigma": 0.15}
+            func=rew.torso_height_tracking_exp, weight=5.0, params={"sigma": 0.15}
         ),
         "feet_height_tracking": RewardTermCfg(
             func=rew.feet_height_tracking_exp, weight=2.0, params={"sigma": 0.15}
@@ -358,7 +358,7 @@ def gr3mini_diff_critic_env_cfg(
             "root_height": TerminationTermCfg(func=term.bad_root_height),
             "shoulder_height": TerminationTermCfg(
                 func=term.bad_shoulder_height,
-                params={"threshold": 0.30},
+                params={"threshold": 0.45},
             ),
             "body_position": TerminationTermCfg(
                 func=term.bad_body_position,
