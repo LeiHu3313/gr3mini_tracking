@@ -33,3 +33,18 @@ case "$stage" in
     exit 2
     ;;
 esac
+
+
+
+# cd /workspace/gr3mini_tracking
+
+# GR3MINI_USE_PREBUILT_ENV=1 \
+# CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
+# ./scripts/train_pipeline.sh teacher \
+#   --gpu-ids all \
+#   --env.scene.num-envs 4096 \
+#   --env.commands.motion.motion-file /workspace/gr3mini_tracking/motions/Extended_3_stageii_from_g1_gr3mini_v211_isaaclab_mjlab.npz \
+#   --agent.max-iterations 10000 \
+#   --agent.save-interval 1000 \
+#   --agent.experiment-name gr3mini_teacher_torso_contact \
+#   --agent.run-name teacher_8gpu_32768env_10000iters
