@@ -3,3 +3,15 @@
 2026-08-16 20:28:00:INFO: OpenGL.acceleratesupport:No OpenGL_accelerate module loaded: No module named 'OpenGL_accelerate'
 2026-08-16 20:28:00:INFO: OpenGL.platform.ctypesloader:Failed to load library ( 'libOpenGL.so.0' ): libOpenGL.so.0: cannot open shared object file: No such file or directory
 2026-08-16 20:28:03:INFO: Starting 8 worker processes.
+2026-08-17 07:47:09:INFO: Workers exited without errors.
+2026-08-17 07:47:09:ERROR: Exception ignored in: <Finalize object, dead>
+2026-08-17 07:47:09:ERROR: Traceback (most recent call last):
+2026-08-17 07:47:09:ERROR:   File "/usr/lib/python3.12/multiprocessing/util.py", line 227, in __call__
+2026-08-17 07:47:09:ERROR:     res = self._callback(*self._args, **self._kwargs)
+2026-08-17 07:47:09:ERROR:           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-08-17 07:47:09:ERROR:   File "/usr/lib/python3.12/multiprocessing/synchronize.py", line 86, in _cleanup
+2026-08-17 07:47:09:ERROR:     from .resource_tracker import unregister
+2026-08-17 07:47:09:ERROR:   File "<frozen importlib._bootstrap>", line 645, in parent
+2026-08-17 07:47:09:ERROR:   File "/opt/gr3mini-tracking-venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 85, in _terminate_process_handler
+2026-08-17 07:47:09:ERROR:     raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+2026-08-17 07:47:09:ERROR: torch.distributed.elastic.multiprocessing.api.SignalException: Process 879 got signal: 15
