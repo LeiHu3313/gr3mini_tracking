@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import torch
+import torch.distributed as dist
 from rsl_rl.storage import RolloutStorage
 from rsl_rl.utils import resolve_obs_groups
 from tensordict import TensorDict
@@ -101,6 +102,10 @@ class AdapterPPO(TanhPPO):
             loss.backward()
             nn.utils.clip_grad_norm_(self.history_encoder.parameters(), self.max_grad_norm)
             nn.utils.clip_grad_norm_(self.world_model.parameters(), self.max_grad_norm)
+            if dist.is_initialized():
+                for param in list(self.history_encoder.parameters()) + list(self.world_model.parameters()):
+                    if param.grad is not None:
+                        dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
             self.world_optimizer.step()
             total_loss += loss.item()
             updates += 1
@@ -162,8 +167,6 @@ class AdapterPPO(TanhPPO):
         cfg["actor"].pop("class_name", None)
         cfg["critic"].pop("class_name", None)
         cfg["obs_groups"] = resolve_obs_groups(obs, cfg["obs_groups"], ["actor", "critic"])
-        if cfg.get("multi_gpu") is not None:
-            raise NotImplementedError("Adapter world-model updates currently support one GPU")
 
         history_encoder = HistoryEncoder().to(device)
         actor = ResidualAdapterActor(
