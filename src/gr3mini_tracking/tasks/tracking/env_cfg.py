@@ -127,7 +127,7 @@ def _events_cfg(play: bool, adapter: bool = False) -> dict[str, EventTermCfg]:
         "push_robot": EventTermCfg(
             func=push_planar_velocity,
             mode="interval",
-            interval_range_s=(5.0, 10.0),
+            interval_range_s=(2.0, 10.0),
             params={
                 "asset_cfg": SceneEntityCfg("robot"),
                 "magnitude_range": (0.1, 2.0),

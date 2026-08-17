@@ -35,7 +35,6 @@ case "$stage" in
 esac
 
 
-
 # cd /workspace/gr3mini_tracking
 
 # GR3MINI_USE_PREBUILT_ENV=1 \
@@ -43,8 +42,8 @@ esac
 # ./scripts/train_pipeline.sh teacher \
 #   --gpu-ids all \
 #   --env.scene.num-envs 4096 \
-#   --env.commands.motion.motion-file /workspace/gr3mini_tracking/motions/Extended_3_stageii_from_g1_gr3mini_v211_isaaclab_mjlab.npz \
+#   --env.commands.motion.motion-file /workspace/gr3mini_tracking/motions/easy_standing_backflip_04_corrected.npz \
 #   --agent.max-iterations 10000 \
 #   --agent.save-interval 1000 \
-#   --agent.experiment-name gr3mini_teacher_torso_contact \
-#   --agent.run-name teacher_8gpu_32768env_10000iters
+#   --agent.experiment-name gr3mini_teacher_backflip \
+#   --agent.run-name teacher_8gpu_4096env_backflip04
