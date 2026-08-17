@@ -32,7 +32,7 @@ from . import rewards as rew
 from . import terminations as term
 from .actions import ReferenceResidualJointPositionActionCfg
 from .commands import Gr3MotionCommandCfg
-from .events import push_planar_velocity
+from .events import push_planar_velocity, randomize_foot_contact_softness
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_MOTION_FILE = (
@@ -119,18 +119,18 @@ def _observation_cfg(adapter: bool, play: bool) -> dict[str, ObservationGroupCfg
     return groups
 
 
-def _events_cfg(play: bool) -> dict[str, EventTermCfg]:
+def _events_cfg(play: bool, adapter: bool = False) -> dict[str, EventTermCfg]:
     if play:
         return {}
     robot_all = SceneEntityCfg("robot", joint_names=(".*",))
-    return {
+    events: dict[str, EventTermCfg] = {
         "push_robot": EventTermCfg(
             func=push_planar_velocity,
             mode="interval",
             interval_range_s=(5.0, 10.0),
             params={
                 "asset_cfg": SceneEntityCfg("robot"),
-                "magnitude_range": (0.1, 1.0),
+                "magnitude_range": (0.1, 2.0),
             },
         ),
         "foot_friction": EventTermCfg(
@@ -199,6 +199,16 @@ def _events_cfg(play: bool) -> dict[str, EventTermCfg]:
             },
         ),
     }
+    if adapter:
+        events["foot_contact_softness"] = EventTermCfg(
+            func=randomize_foot_contact_softness,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", geom_names=(r"^(left|right)_foot$",)),
+                "timeconst_range": (0.005, 0.04),
+            },
+        )
+    return events
 
 
 def _undesired_self_collision_sensor_cfgs() -> tuple[ContactSensorCfg, ...]:
@@ -335,7 +345,7 @@ def gr3mini_diff_critic_env_cfg(
             num_envs=1 if play else 4096,
             env_spacing=2.0,
             terrain=TerrainEntityCfg(terrain_type="plane"),
-            entities={"robot": get_gr3mini211_robot_cfg()},
+            entities={"robot": get_gr3mini211_robot_cfg(motor_delay_max=3 if adapter else 0)},
             sensors=sensors,
         ),
         observations=_observation_cfg(adapter, play),
@@ -350,7 +360,7 @@ def gr3mini_diff_critic_env_cfg(
             )
         },
         commands={"motion": motion},
-        events=_events_cfg(play),
+        events=_events_cfg(play, adapter),
         rewards=_rewards_cfg(),
         terminations={
             "time_out": TerminationTermCfg(func=time_out, time_out=True),

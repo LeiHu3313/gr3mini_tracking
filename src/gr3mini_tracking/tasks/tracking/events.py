@@ -11,6 +11,28 @@ if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
 
 
+def randomize_foot_contact_softness(
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor | None,
+    timeconst_range: tuple[float, float],
+    asset_cfg: SceneEntityCfg,
+) -> None:
+    """Randomize foot geom solref[0] (contact time constant) to simulate different ground materials.
+
+    Lower values (~0.005s) = hard ground; higher values (~0.04s) = soft/compliant surface.
+    MuJoCo default is 0.02s.
+    """
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=env.device)
+    asset = env.scene[asset_cfg.name]
+    geom_ids = asset.indexing.geom_ids[asset_cfg.geom_ids]
+    n_envs = len(env_ids)
+    n_geoms = len(geom_ids)
+    timeconst = torch.empty(n_envs, n_geoms, device=env.device).uniform_(*timeconst_range)
+    env_grid, geom_grid = torch.meshgrid(env_ids, geom_ids, indexing="ij")
+    env.sim.model.geom_solref[env_grid, geom_grid, 0] = timeconst
+
+
 def push_planar_velocity(
     env: ManagerBasedRlEnv,
     env_ids: torch.Tensor | None,

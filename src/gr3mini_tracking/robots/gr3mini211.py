@@ -294,7 +294,7 @@ def get_spec() -> mujoco.MjSpec:  # pyright: ignore[reportAttributeAccessIssue]
     return spec
 
 
-def _actuators() -> tuple[IdealPdActuatorCfg, ...]:
+def _actuators(motor_delay_max: int = 0) -> tuple[IdealPdActuatorCfg, ...]:
     # One group per joint preserves the non-uniform upstream gain/limit arrays.
     return tuple(
         IdealPdActuatorCfg(
@@ -302,12 +302,15 @@ def _actuators() -> tuple[IdealPdActuatorCfg, ...]:
             stiffness=kp,
             damping=kd,
             effort_limit=effort,
+            delay_min_lag=0,
+            delay_max_lag=motor_delay_max,
+            delay_hold_prob=0.0,
         )
         for name, kp, kd, effort in zip(JOINT_NAMES, STIFFNESS, DAMPING, EFFORT_LIMITS, strict=True)
     )
 
 
-def get_gr3mini211_robot_cfg() -> EntityCfg:
+def get_gr3mini211_robot_cfg(motor_delay_max: int = 0) -> EntityCfg:
     """Return a fresh GR3Mini211 entity configuration."""
     return EntityCfg(
         init_state=EntityCfg.InitialStateCfg(
@@ -317,7 +320,7 @@ def get_gr3mini211_robot_cfg() -> EntityCfg:
         ),
         spec_fn=get_spec,
         articulation=EntityArticulationInfoCfg(
-            actuators=_actuators(), soft_joint_pos_limit_factor=0.95
+            actuators=_actuators(motor_delay_max), soft_joint_pos_limit_factor=0.95
         ),
         collisions=(
             CollisionCfg(
