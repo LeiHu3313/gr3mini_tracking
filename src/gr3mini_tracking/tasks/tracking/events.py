@@ -25,7 +25,7 @@ def randomize_foot_contact_softness(
     if env_ids is None:
         env_ids = torch.arange(env.num_envs, device=env.device)
     asset = env.scene[asset_cfg.name]
-    geom_ids = asset.indexing.geom_ids[asset_cfg.geom_ids]
+    geom_ids = asset.indexing.geom_ids[asset_cfg.geom_ids].to(torch.long)
     n_envs = len(env_ids)
     n_geoms = len(geom_ids)
     timeconst = torch.empty(n_envs, n_geoms, device=env.device).uniform_(*timeconst_range)
