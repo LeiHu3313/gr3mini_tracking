@@ -18,6 +18,8 @@ gr3mini-play = "gr3mini_tracking.cli.play:main"
 gr3mini-list-envs = "gr3mini_tracking.cli.list_envs:main"
 gr3mini-convert-motion = "gr3mini_tracking.cli.convert_motion:main"
 gr3mini-replay-motion = "gr3mini_tracking.cli.replay_motion:main"
+gr3mini-export-adapter = "gr3mini_tracking.cli.export_adapter:main"
+gr3mini-export-ref-motion = "gr3mini_tracking.cli.export_ref_motion:main"
 
 [build-system]
 requires = ["uv_build>=0.11.32,<0.12.0"]
