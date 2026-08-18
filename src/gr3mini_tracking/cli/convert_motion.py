@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import pickle
 from pathlib import Path
 
 import mujoco
@@ -334,8 +335,90 @@ def _convert_csv_gr3mini(source: Path) -> dict[str, np.ndarray]:
     }
 
 
+def _convert_gmr_pkl(source: Path) -> dict[str, np.ndarray]:
+    """Convert a gmr-pkl retargeted motion (root_pos/rot + dof_pos) to mjlab tracking format."""
+    with source.open("rb") as f:
+        raw = pickle.load(f)
+
+    required = {"fps", "root_pos", "root_rot", "dof_pos", "dof_names", "root_quat_format"}
+    missing = required.difference(raw.keys())
+    if missing:
+        raise ValueError(f"gmr-pkl source is missing fields: {sorted(missing)}")
+    if raw["root_quat_format"] != "xyzw":
+        raise ValueError(f"expected xyzw quaternion format, got {raw['root_quat_format']!r}")
+    dof_names = tuple(raw["dof_names"])
+    if dof_names != JOINT_NAMES:
+        raise ValueError("gmr-pkl dof_names do not match GR3Mini211 v2.1.1 JOINT_NAMES")
+
+    frequency = float(raw["fps"])
+    if not np.isclose(frequency, 50.0):
+        raise ValueError(f"expected 50 Hz motion, got {frequency}")
+
+    root_pos = np.asarray(raw["root_pos"], dtype=np.float32)
+    root_quat_xyzw = np.asarray(raw["root_rot"], dtype=np.float32)
+    root_quat = np.concatenate([root_quat_xyzw[:, 3:4], root_quat_xyzw[:, :3]], axis=-1)
+    joint_pos = np.asarray(raw["dof_pos"], dtype=np.float32)
+
+    frame_count = root_pos.shape[0]
+    if frame_count < 2:
+        raise ValueError("gmr-pkl has fewer than 2 frames")
+
+    model = get_spec().compile()
+    runtime = mujoco.MjData(model)  # pyright: ignore[reportAttributeAccessIssue]
+    body_ids = np.asarray(
+        [
+            mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)  # pyright: ignore[reportAttributeAccessIssue]
+            for name in EXPECTED_BODY_NAMES
+        ]
+    )
+    foot_site_ids = np.asarray(
+        [
+            mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, name)  # pyright: ignore[reportAttributeAccessIssue]
+            for name in FOOT_SITE_NAMES
+        ]
+    )
+    if np.any(body_ids < 0) or np.any(foot_site_ids < 0):
+        raise ValueError("mjlab GR3Mini model is missing required tracking bodies or foot sites")
+
+    body_pos = np.empty((frame_count, len(EXPECTED_BODY_NAMES), 3), dtype=np.float32)
+    body_quat = np.empty((frame_count, len(EXPECTED_BODY_NAMES), 4), dtype=np.float32)
+    feet_height = np.empty((frame_count, len(FOOT_SITE_NAMES)), dtype=np.float32)
+    for frame in range(frame_count):
+        runtime.qpos[:3] = root_pos[frame]
+        runtime.qpos[3:7] = root_quat[frame]
+        runtime.qpos[7:] = joint_pos[frame]
+        mujoco.mj_forward(model, runtime)  # pyright: ignore[reportAttributeAccessIssue]
+        body_pos[frame] = runtime.xpos[body_ids]
+        body_quat[frame] = runtime.xquat[body_ids]
+        feet_height[frame] = runtime.site_xpos[foot_site_ids, 2]
+
+    dt = 1.0 / frequency
+    root_ang_vel_w = _quaternion_angular_velocity_w(root_quat, dt)
+    return {
+        "joint_pos": joint_pos,
+        "joint_vel": _finite_difference(joint_pos, dt),
+        "body_pos_w": body_pos,
+        "body_quat_w": body_quat,
+        "body_lin_vel_w": _finite_difference(body_pos, dt),
+        "body_ang_vel_w": _quaternion_angular_velocity_w(body_quat, dt),
+        "root_lin_vel_w": _finite_difference(root_pos, dt),
+        "root_ang_vel_b": _rotate_world_to_body(root_quat, root_ang_vel_w).astype(np.float32),
+        "root_projected_gravity_b": _rotate_world_to_body(
+            root_quat,
+            np.broadcast_to(np.asarray([0.0, 0.0, -1.0], dtype=np.float32), root_pos.shape),
+        ).astype(np.float32),
+        "feet_height_w": feet_height,
+        "joint_names": np.asarray(JOINT_NAMES),
+        "body_names": np.asarray(EXPECTED_BODY_NAMES),
+        "frequency": np.asarray(frequency),
+        "metadata_json": _metadata(source, "gmr_pkl_gr3mini_v211", frequency),
+    }
+
+
 def convert_motion_file(source: Path, destination: Path) -> None:
-    if source.suffix.lower() == ".csv":
+    if source.suffix.lower() == ".pkl":
+        converted = _convert_gmr_pkl(source)
+    elif source.suffix.lower() == ".csv":
         converted = _convert_csv_gr3mini(source)
     else:
         with np.load(source, allow_pickle=False) as data:

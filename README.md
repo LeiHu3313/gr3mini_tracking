@@ -34,40 +34,6 @@ Docker 镜像会固定 CUDA 12.8、Python 3.12、PyTorch 2.9.0，以及
 `mjlab v1.6.0`（commit `0fb8a681136be94ffc636a3dd423cabb97d91f10`）。因此服务器不需要
 准备 `../mjlab` 或项目的 `.venv`。
 
-构建并推送镜像：
-
-```bash
-docker login docker.fftaicorp.com
-
-PROJECT=gr3mini_tracking \
-IMAGE_NAME=gr3mini-tracking \
-TAG=py312-cuda12.8-v2 \
-./scripts/docker/build_and_push_gr3mini_tracking.sh
-```
-
-服务器拉取并验证 GPU：
-
-```bash
-IMAGE=docker.fftaicorp.com/gr3mini_tracking/gr3mini-tracking:py312-cuda12.8-v2
-docker pull "$IMAGE"
-docker run --rm --gpus all --ipc=host "$IMAGE" Gr3Mini-Tracking-Teacher --help
-```
-
-单卡训练时只需挂载日志目录：
-
-```bash
-docker run --rm --gpus '"device=0"' --ipc=host \
-  -v "$PWD/logs:/workspace/gr3mini_tracking/logs" \
-  "$IMAGE" Gr3Mini-Tracking-Teacher \
-  --env.scene.num-envs 4096 \
-  --agent.max-iterations 5000 \
-  --agent.save-interval 500 \
-  --agent.run-name teacher_docker
-```
-
-多卡训练可将 `--gpus '"device=0,1,2,3"'` 与 `--gpu-ids all` 一起使用；
-`--env.scene.num-envs` 仍表示每张卡的环境数。
-
 交互使用已发布的 digest 镜像时，可用：
 
 ```bash
@@ -150,15 +116,12 @@ policy 抖动惩罚。关节/速度限位和 self-collision safety penalties 保
 `6 × 56 + 6 × 25 + 5 × 40 = 686` 维，严格只使用 encoder、IMU 与自己发出的 action：
 状态帧为 `[q-default, qd×0.05, gyro×0.05, projected_gravity]`，动作帧为
 `last_target-default`；未来命令帧为
-`[q_ref-q, ref_linvel_local×0.05, (ref_angvel-current_gyro)×0.05,
-current-to-ref_base_rot6d, torso_height_ref, feet_height_ref]`。Actor 不读取当前
+`[q_ref-q, ref_linvel_local×0.05, (ref_angvel-current_gyro)×0.05, current-to-ref_base_rot6d, torso_height_ref, feet_height_ref]`。Actor 不读取当前
 root/world position、current root linear velocity、torso height、feet height 或 contact。
 
 Critic 输入为 `686 + 398 + 405 = 1489` 维：先是无噪声语义副本的 Actor observation；
-再接当前特权状态 `[root_linvel, torso/feet height, contact, 26 body root-local
-pose/velocity]`；最后接 reward-aligned tracking error
-`[26 body local pose/velocity error, root linear/angular velocity error,
-current-to-ref root rot6d, torso/feet height error]`。这避免重复六帧特权状态。所有角速度、
+再接当前特权状态 `[root_linvel, torso/feet height, contact, 26 body root-local pose/velocity]`；最后接 reward-aligned tracking error
+`[26 body local pose/velocity error, root linear/angular velocity error, current-to-ref root rot6d, torso/feet height error]`。这避免重复六帧特权状态。所有角速度、
 线速度和关节速度均乘 `0.05`；torso 明确为 `torso_link`，不是 floating `base_link`。
 
 这是 observation layout v3。所有旧 671-D/656-D teacher 的首层输入都与新 686-D Actor
@@ -234,30 +197,14 @@ teacher base、history encoder 和 world model，不需要额外传 teacher chec
 
 ## 训练合同
 
-| 项目 | Teacher | Adapter |
-|---|---:|---:|
-| Actor observation | 686 | 686 + dynamics embedding |
-| Critic observation | 1489 | 1489 + dynamics embedding |
-| Action | 25-D `reference q + residual` | 相同 |
-| Actor state / action history | `6 x 56` / `6 x 25` | 相同 |
-| Critic privileged / error | `398` / `405`（均为当前单帧） | 相同 |
-| Future reference | Actor `5 x 40`，并作为 Critic 前缀的一部分 | 相同 |
-| Adapter history | - | 79 x 81 |
-| Dynamics embedding | - | 128 |
-| World state | - | 57 |
-
-源实现是 JAX/MJX + Brax，目标是 PyTorch + MuJoCo-Warp + RSL-RL，因此旧 JAX
-checkpoint 不能直接加载；teacher 和 adapter 必须都由这个项目重新训练。源 torque-speed
-包络和 RFI motor noise 没有在本次最小迁移里数值复刻，PD、effort limit、armature、
-friction 和主要 DR 已保留。完整差异见迁移计划。
-
-## 验证
-
-```bash
-uv run ruff check .
-uv run pyright
-uv run pytest -q
-```
-
-资产来源与许可证见 `assets/gr3mini211/README.md` 和
-`assets/gr3mini211/UPSTREAM_LICENSE`。
+| 项目                         |                                      Teacher |                   Adapter |
+| ---------------------------- | -------------------------------------------: | ------------------------: |
+| Actor observation            |                                          686 |  686 + dynamics embedding |
+| Critic observation           |                                         1489 | 1489 + dynamics embedding |
+| Action                       |              25-D `reference q + residual` |                      相同 |
+| Actor state / action history |                      `6 x 56` / `6 x 25` |                      相同 |
+| Critic privileged / error    |            `398` / `405`（均为当前单帧） |                      相同 |
+| Future reference             | Actor `5 x 40`，并作为 Critic 前缀的一部分 |                      相同 |
+| Adapter history              |                                            - |                   79 x 81 |
+| Dynamics embedding           |                                            - |                       128 |
+| World state                  |                                            - |                        57 |
