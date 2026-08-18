@@ -103,9 +103,47 @@ def write_frame(model, data, motion: MotionReplayData, frame: int) -> None:
     mujoco.mj_forward(model, data)  # pyright: ignore[reportAttributeAccessIssue]
 
 
+def _build_model() -> mujoco.MjModel:  # pyright: ignore[reportAttributeAccessIssue]
+    """Compile the robot spec with a visible floor and directional light."""
+    spec = get_spec()
+
+    tex = spec.add_texture()
+    tex.name = "floor_checker"
+    tex.type = mujoco.mjtTexture.mjTEXTURE_2D  # pyright: ignore[reportAttributeAccessIssue]
+    tex.builtin = mujoco.mjtBuiltin.mjBUILTIN_CHECKER  # pyright: ignore[reportAttributeAccessIssue]
+    tex.rgb1 = [0.2, 0.3, 0.4]
+    tex.rgb2 = [0.3, 0.4, 0.5]
+    tex.width = 300
+    tex.height = 300
+
+    mat = spec.add_material()
+    mat.name = "floor_mat"
+    mat.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = "floor_checker"  # pyright: ignore[reportAttributeAccessIssue]
+    mat.texuniform = True
+    mat.texrepeat = [4.0, 4.0]
+    mat.reflectance = 0.2
+
+    geom = spec.worldbody.add_geom()
+    geom.name = "floor"
+    geom.type = mujoco.mjtGeom.mjGEOM_PLANE  # pyright: ignore[reportAttributeAccessIssue]
+    geom.size = [0, 0, 0.01]
+    geom.material = "floor_mat"
+
+    light = spec.worldbody.add_light()
+    light.name = "sun"
+    light.type = mujoco.mjtLightType.mjLIGHT_DIRECTIONAL  # pyright: ignore[reportAttributeAccessIssue]
+    light.pos = [0, 0, 4]
+    light.dir = [0, 0, -1]
+    light.diffuse = [0.8, 0.8, 0.8]
+    light.specular = [0.2, 0.2, 0.2]
+    light.ambient = [0.3, 0.3, 0.3]
+
+    return spec.compile()
+
+
 def run_headless(motion: MotionReplayData, start_frame: int, max_frames: int) -> None:
     """Replay a finite frame range without opening a viewer."""
-    model = get_spec().compile()
+    model = _build_model()
     data = mujoco.MjData(model)  # pyright: ignore[reportAttributeAccessIssue]
     for offset in range(max_frames):
         write_frame(model, data, motion, (start_frame + offset) % motion.frame_count)
@@ -115,7 +153,7 @@ def run_viewer(motion: MotionReplayData, start_frame: int, max_frames: int, spee
     """Replay frames in a native MuJoCo viewer until closed or maxed out."""
     import mujoco.viewer
 
-    model = get_spec().compile()
+    model = _build_model()
     data = mujoco.MjData(model)  # pyright: ignore[reportAttributeAccessIssue]
     frame = start_frame
     paused = False
