@@ -261,7 +261,7 @@ def _rewards_cfg() -> dict[str, RewardTermCfg]:
         #     func=rew.root_position_tracking_exp, weight=0.5, params={"sigma": 0.30}
         # ),
         "root_orientation": RewardTermCfg(
-            func=rew.root_orientation_tracking_exp, weight=1.0, params={"sigma": 0.50}
+            func=rew.root_orientation_tracking_exp, weight=3.0, params={"sigma": 0.50}
         ),
         "torso_world_orientation": RewardTermCfg(
             func=rew.torso_world_orientation_tracking_exp, weight=5.0, params={"sigma": 0.50}
