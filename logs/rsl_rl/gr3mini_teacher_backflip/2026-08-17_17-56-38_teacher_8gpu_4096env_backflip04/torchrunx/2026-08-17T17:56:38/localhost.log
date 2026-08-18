@@ -3,3 +3,12 @@
 2026-08-17 17:56:41:INFO: OpenGL.acceleratesupport:No OpenGL_accelerate module loaded: No module named 'OpenGL_accelerate'
 2026-08-17 17:56:41:INFO: OpenGL.platform.ctypesloader:Failed to load library ( 'libOpenGL.so.0' ): libOpenGL.so.0: cannot open shared object file: No such file or directory
 2026-08-17 17:56:44:INFO: Starting 8 worker processes.
+2026-08-18 04:46:11:INFO: Workers exited without errors.
+2026-08-18 04:46:11:ERROR: Exception ignored in: <function _ConnectionBase.__del__ at 0x7f8e602e8360>
+2026-08-18 04:46:11:ERROR: Traceback (most recent call last):
+2026-08-18 04:46:11:ERROR:   File "/usr/lib/python3.12/multiprocessing/connection.py", line 131, in __del__
+2026-08-18 04:46:11:ERROR:     def __del__(self):
+2026-08-18 04:46:11:ERROR: 
+2026-08-18 04:46:11:ERROR:   File "/opt/gr3mini-tracking-venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 85, in _terminate_process_handler
+2026-08-18 04:46:11:ERROR:     raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+2026-08-18 04:46:11:ERROR: torch.distributed.elastic.multiprocessing.api.SignalException: Process 2369 got signal: 15

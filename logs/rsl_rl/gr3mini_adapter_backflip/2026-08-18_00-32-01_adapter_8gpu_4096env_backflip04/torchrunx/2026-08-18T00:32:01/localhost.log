@@ -1,0 +1,20 @@
+2026-08-18 00:32:02:INFO: [Gloo] Rank 1 is connected to 1 peer ranks. Expected number of connected peer ranks is : 1
+2026-08-18 00:32:03:INFO: OpenGL.platform.ctypesloader:Failed to load library ( 'libOpenGL.so.0' ): libOpenGL.so.0: cannot open shared object file: No such file or directory
+2026-08-18 00:32:03:INFO: OpenGL.acceleratesupport:No OpenGL_accelerate module loaded: No module named 'OpenGL_accelerate'
+2026-08-18 00:32:03:INFO: OpenGL.platform.ctypesloader:Failed to load library ( 'libOpenGL.so.0' ): libOpenGL.so.0: cannot open shared object file: No such file or directory
+2026-08-18 00:32:07:INFO: Starting 8 worker processes.
+2026-08-18 00:33:01:INFO: Workers exited with errors.
+2026-08-18 00:33:01:ERROR: Exception ignored in: <module 'threading' from '/usr/lib/python3.12/threading.py'>
+2026-08-18 00:33:01:ERROR: Traceback (most recent call last):
+2026-08-18 00:33:01:ERROR:   File "/usr/lib/python3.12/threading.py", line 1592, in _shutdown
+2026-08-18 00:33:01:ERROR:     atexit_call()
+2026-08-18 00:33:01:ERROR:   File "/usr/lib/python3.12/concurrent/futures/thread.py", line 27, in _python_exit
+2026-08-18 00:33:01:ERROR:     items = list(_threads_queues.items())
+2026-08-18 00:33:01:ERROR:             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-08-18 00:33:01:ERROR:   File "/usr/lib/python3.12/weakref.py", line 462, in items
+2026-08-18 00:33:01:ERROR:     with _IterationGuard(self):
+2026-08-18 00:33:01:ERROR:   File "/usr/lib/python3.12/_weakrefset.py", line 31, in __exit__
+2026-08-18 00:33:01:ERROR:     s.remove(self)
+2026-08-18 00:33:01:ERROR:   File "/opt/gr3mini-tracking-venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 85, in _terminate_process_handler
+2026-08-18 00:33:01:ERROR:     raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+2026-08-18 00:33:01:ERROR: torch.distributed.elastic.multiprocessing.api.SignalException: Process 4801 got signal: 15
