@@ -62,15 +62,15 @@ def test_observation_contract_dimensions() -> None:
 def test_general_tracking_reward_configuration() -> None:
     rewards = _rewards_cfg()
     expected_weights = {
-        "body_local_pos": 2.0,
+        "body_local_pos": 1.0,
         "feet_pos_tracking": 2.1,
-        "body_local_rot": 0.5,
+        "body_local_rot": 1.0,
         "body_global_linvel": 1.0,
         "body_global_angvel": 1.0,
         "torso_world_angvel": 3.0,
-        "root_orientation": 1.0,
-        "torso_world_orientation": 3.0,
-        "torso_height_tracking": 2.0,
+        "root_orientation": 3.0,
+        "torso_world_orientation": 5.0,
+        "torso_height_tracking": 3.0,
         "joint_pos_tracking": 0.75,
         "joint_vel_tracking": 0.75,
         "feet_height_tracking": 2.0,
@@ -78,7 +78,7 @@ def test_general_tracking_reward_configuration() -> None:
         "penalty_torque": -1.0e-5,
         "smoothness_joint": -1.0e-6,
         "feet_slip": -0.5,
-        "dof_pos_limit": -5.0,
+        "dof_pos_limit": -10.0,
         "dof_vel_limit": -10.0,
         "undesired_self_collision": -10.0,
         "undesired_ground_contact": -10.0,
@@ -123,8 +123,9 @@ def test_tracking_terminations_only_reset_falls_or_invalid_states() -> None:
         "invalid_state",
     }
     assert terminations["root_height"].func is term.bad_root_height
+    assert terminations["root_height"].params == {"threshold": 0.3}
     assert terminations["shoulder_height"].func is term.bad_shoulder_height
-    assert terminations["shoulder_height"].params == {"threshold": 0.30}
+    assert terminations["shoulder_height"].params == {"threshold": 0.45}
     assert terminations["body_position"].func is term.bad_body_position
     assert terminations["body_position"].params == {"threshold": 0.50}
     assert terminations["torso_ground_contact_too_long"].func is term.torso_ground_contact_too_long

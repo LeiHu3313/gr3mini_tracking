@@ -26,13 +26,14 @@ from gr3mini_tracking.robots.gr3mini211 import (
     UNDESIRED_SELF_COLLISION_PAIRS,
     get_gr3mini211_robot_cfg,
 )
+from gr3mini_tracking.robots.motor_model import RFI_LIM_SCALE_RANGE
 
 from . import observations as obs
 from . import rewards as rew
 from . import terminations as term
 from .actions import ReferenceResidualJointPositionActionCfg
 from .commands import Gr3MotionCommandCfg
-from .events import push_planar_velocity, randomize_foot_contact_softness
+from .events import push_planar_velocity, randomize_foot_contact_softness, randomize_motor_rfi_scale
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_MOTION_FILE = (
@@ -190,12 +191,20 @@ def _events_cfg(play: bool, adapter: bool = False) -> dict[str, EventTermCfg]:
         ),
         "pd_gains": EventTermCfg(
             func=dr.pd_gains,
-            mode="startup",
+            mode="reset",
             params={
                 "asset_cfg": SceneEntityCfg("robot", actuator_names=[".*"]),
                 "kp_range": (0.75, 1.25),
                 "kd_range": (0.75, 1.25),
                 "operation": "scale",
+            },
+        ),
+        "motor_rfi_noise": EventTermCfg(
+            func=randomize_motor_rfi_scale,
+            mode="reset",
+            params={
+                "asset_cfg": SceneEntityCfg("robot", actuator_names=(".*",)),
+                "rfi_lim_scale_range": RFI_LIM_SCALE_RANGE,
             },
         ),
     }
@@ -228,13 +237,13 @@ def _undesired_self_collision_sensor_cfgs() -> tuple[ContactSensorCfg, ...]:
 def _rewards_cfg() -> dict[str, RewardTermCfg]:
     return {
         "body_local_pos": RewardTermCfg(
-            func=rew.body_local_position_tracking_exp, weight=2.0, params={"sigma": 0.30}
+            func=rew.body_local_position_tracking_exp, weight=1.0, params={"sigma": 0.30}
         ),
         "feet_pos_tracking": RewardTermCfg(
             func=rew.feet_local_position_tracking_exp, weight=2.1, params={"sigma": 1.0}
         ),
         "body_local_rot": RewardTermCfg(
-            func=rew.body_local_orientation_tracking_exp, weight=0.5, params={"sigma": 1.0}
+            func=rew.body_local_orientation_tracking_exp, weight=1.0, params={"sigma": 1.0}
         ),
         "body_global_linvel": RewardTermCfg(
             func=rew.body_global_linear_velocity_tracking_exp,
@@ -248,7 +257,7 @@ def _rewards_cfg() -> dict[str, RewardTermCfg]:
         ),
         "torso_world_angvel": RewardTermCfg(
             func=rew.torso_world_angular_velocity_tracking_exp,
-            weight=5.0,
+            weight=3.0,
             params={"sigma": 6.0},
         ),
         "joint_pos_tracking": RewardTermCfg(
@@ -267,7 +276,7 @@ def _rewards_cfg() -> dict[str, RewardTermCfg]:
             func=rew.torso_world_orientation_tracking_exp, weight=5.0, params={"sigma": 0.50}
         ),
         "torso_height_tracking": RewardTermCfg(
-            func=rew.torso_height_tracking_exp, weight=5.0, params={"sigma": 0.15}
+            func=rew.torso_height_tracking_exp, weight=3.0, params={"sigma": 0.15}
         ),
         "feet_height_tracking": RewardTermCfg(
             func=rew.feet_height_tracking_exp, weight=2.0, params={"sigma": 0.15}
@@ -276,7 +285,7 @@ def _rewards_cfg() -> dict[str, RewardTermCfg]:
         "penalty_torque": RewardTermCfg(func=rew.joint_torque_l2, weight=-1.0e-5),
         "smoothness_joint": RewardTermCfg(func=rew.joint_smoothness, weight=-1.0e-6),
         "feet_slip": RewardTermCfg(func=rew.feet_slip, weight=-0.5),
-        "dof_pos_limit": RewardTermCfg(func=rew.joint_position_soft_limit, weight=-5.0),
+        "dof_pos_limit": RewardTermCfg(func=rew.joint_position_soft_limit, weight=-10.0),
         "dof_vel_limit": RewardTermCfg(func=rew.joint_velocity_limit, weight=-10.0),
         "undesired_self_collision": RewardTermCfg(
             func=rew.undesired_self_collision_count, weight=-10.0
@@ -308,6 +317,13 @@ def gr3mini_diff_critic_env_cfg(
         adaptive_alpha=0.01,
         debug_vis=play,
     )
+    # Episode-level motor delay: the lag is sampled once per episode (at the
+    # first control step) and held, matching the source's per-episode fixed delay
+    # rather than resampling every step.
+    physics_timestep = 0.002
+    decimation = 10
+    episode_length_s = 1.0e9 if play else 20.0
+    episode_steps = max(1, int(round(episode_length_s / (physics_timestep * decimation))))
     sensors = (
         ContactSensorCfg(
             name="feet_ground_contact",
@@ -345,7 +361,12 @@ def gr3mini_diff_critic_env_cfg(
             num_envs=1 if play else 4096,
             env_spacing=2.0,
             terrain=TerrainEntityCfg(terrain_type="plane"),
-            entities={"robot": get_gr3mini211_robot_cfg(motor_delay_max=3 if adapter else 0)},
+            entities={
+                "robot": get_gr3mini211_robot_cfg(
+                    motor_delay_max=3 if adapter else 0,
+                    motor_delay_update_period=episode_steps if adapter else 0,
+                )
+            },
             sensors=sensors,
         ),
         observations=_observation_cfg(adapter, play),
@@ -364,8 +385,9 @@ def gr3mini_diff_critic_env_cfg(
         rewards=_rewards_cfg(),
         terminations={
             "time_out": TerminationTermCfg(func=time_out, time_out=True),
-            # Reference-relative fall gates matching the original tracker.
-            "root_height": TerminationTermCfg(func=term.bad_root_height),
+            "root_height": TerminationTermCfg(
+                func=term.bad_root_height, params={"threshold": 0.3}
+            ),
             "shoulder_height": TerminationTermCfg(
                 func=term.bad_shoulder_height,
                 params={"threshold": 0.45},
@@ -381,12 +403,6 @@ def gr3mini_diff_critic_env_cfg(
             # Always reset invalid MuJoCo states rather than letting them enter
             # a rollout.  This is a numerical-safety check, not a tracking term.
             "invalid_state": TerminationTermCfg(func=term.invalid_state),
-            # These are useful tracking diagnostics, but not fall conditions:
-            # the target motion contains one-leg/hand-supported poses.  Making
-            # either a termination causes short episodes before PPO can learn
-            # the recovery.  Their corresponding rewards remain active.
-            # "shoulder_height": TerminationTermCfg(func=term.bad_shoulder_height),
-            # "body_position": TerminationTermCfg(func=term.bad_body_position),
         },
         viewer=ViewerConfig(
             origin_type=ViewerConfig.OriginType.ASSET_BODY,
@@ -401,15 +417,15 @@ def gr3mini_diff_critic_env_cfg(
             nconmax=100,
             njmax=500,
             mujoco=MujocoCfg(
-                timestep=0.002,
+                timestep=physics_timestep,
                 integrator="euler",
                 iterations=3,
                 ls_iterations=5,
                 disableflags=("eulerdamp",),
             ),
         ),
-        decimation=10,
-        episode_length_s=1.0e9 if play else 20.0,
+        decimation=decimation,
+        episode_length_s=episode_length_s,
         scale_rewards_by_dt=True,
     )
     return cfg

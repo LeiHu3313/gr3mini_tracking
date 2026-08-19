@@ -84,6 +84,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
   --agent.max-iterations 10000
 ```
 
+电机特性对齐实验说明见 [`docs/experiments/gr3mini211_motor_alignment.md`](docs/experiments/gr3mini211_motor_alignment.md)。
+奖励/终止调优说明见 [`docs/experiments/gr3mini211_tracking_reward_termination_tuning.md`](docs/experiments/gr3mini211_tracking_reward_termination_tuning.md)。
+
 Docker 容器内加 `GR3MINI_USE_PREBUILT_ENV=1` 前缀跳过 uv sync：
 
 ```bash

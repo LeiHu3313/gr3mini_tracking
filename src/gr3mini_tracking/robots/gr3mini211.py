@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import mujoco
-from mjlab.actuator import IdealPdActuatorCfg
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 from mjlab.utils.spec_config import CollisionCfg
+
+from .motor_model import TN_X1, TN_X2, TN_X3, TN_Y1, TN_Y2, TN_Y3, TorqueSpeedPdActuatorCfg
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 GR3MINI211_XML = PROJECT_ROOT / "assets" / "gr3mini211" / "gr3mini_v211.xml"
@@ -125,29 +126,29 @@ DAMPING = (
 )
 
 EFFORT_LIMITS = (
-    120.0,
-    14.0,
-    14.0,
-    40.0,
+    140.0,
+    11.0,
+    11.0,
+    42.0,
     28.5,
     28.5,
     28.5,
-    14.0,
-    40.0,
+    11.0,
+    42.0,
     28.5,
     28.5,
     28.5,
-    14.0,
-    120.0,
-    40.0,
-    40.0,
-    120.0,
+    11.0,
+    140.0,
+    42.0,
+    42.0,
+    140.0,
     52.0,
     25.0,
-    120.0,
-    40.0,
-    40.0,
-    120.0,
+    140.0,
+    42.0,
+    42.0,
+    140.0,
     52.0,
     25.0,
 )
@@ -294,23 +295,48 @@ def get_spec() -> mujoco.MjSpec:  # pyright: ignore[reportAttributeAccessIssue]
     return spec
 
 
-def _actuators(motor_delay_max: int = 0) -> tuple[IdealPdActuatorCfg, ...]:
+def _actuators(
+    motor_delay_max: int = 0, motor_delay_update_period: int = 0
+) -> tuple[TorqueSpeedPdActuatorCfg, ...]:
     # One group per joint preserves the non-uniform upstream gain/limit arrays.
     return tuple(
-        IdealPdActuatorCfg(
+        TorqueSpeedPdActuatorCfg(
             target_names_expr=(name,),
             stiffness=kp,
             damping=kd,
             effort_limit=effort,
+            tn_x1=tn_x1,
+            tn_x2=tn_x2,
+            tn_x3=tn_x3,
+            tn_y1=tn_y1,
+            tn_y2=tn_y2,
+            tn_y3=tn_y3,
             delay_min_lag=0,
             delay_max_lag=motor_delay_max,
             delay_hold_prob=0.0,
+            # Episode-level delay: sample once at the first step of each episode
+            delay_update_period=motor_delay_update_period,
+            delay_per_env_phase=motor_delay_update_period <= 0,
         )
-        for name, kp, kd, effort in zip(JOINT_NAMES, STIFFNESS, DAMPING, EFFORT_LIMITS, strict=True)
+        for name, kp, kd, effort, tn_x1, tn_x2, tn_x3, tn_y1, tn_y2, tn_y3 in zip(
+            JOINT_NAMES,
+            STIFFNESS,
+            DAMPING,
+            EFFORT_LIMITS,
+            TN_X1,
+            TN_X2,
+            TN_X3,
+            TN_Y1,
+            TN_Y2,
+            TN_Y3,
+            strict=True,
+        )
     )
 
 
-def get_gr3mini211_robot_cfg(motor_delay_max: int = 0) -> EntityCfg:
+def get_gr3mini211_robot_cfg(
+    motor_delay_max: int = 0, motor_delay_update_period: int = 0
+) -> EntityCfg:
     """Return a fresh GR3Mini211 entity configuration."""
     return EntityCfg(
         init_state=EntityCfg.InitialStateCfg(
@@ -320,7 +346,8 @@ def get_gr3mini211_robot_cfg(motor_delay_max: int = 0) -> EntityCfg:
         ),
         spec_fn=get_spec,
         articulation=EntityArticulationInfoCfg(
-            actuators=_actuators(motor_delay_max), soft_joint_pos_limit_factor=0.95
+            actuators=_actuators(motor_delay_max, motor_delay_update_period),
+            soft_joint_pos_limit_factor=0.95
         ),
         collisions=(
             CollisionCfg(
